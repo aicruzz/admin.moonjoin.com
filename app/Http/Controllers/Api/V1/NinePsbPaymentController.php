@@ -439,6 +439,110 @@ class NinePsbPaymentController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Deliveryman Payout — real-time bank transfer via 9PSB
+    // POST /api/v1/merchants/payout - (9pSb endpoint)
+    // -------------------------------------------------------------------------
+    public function payoutDeliveryManToBank(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'amount' => 'required|numeric|min:1',
+            'accountNumber' => 'required|string|size:10',
+            'bankCode' => 'required|string',
+            'accountName' => 'required|string|max:255',
+            'narration' => 'required|string|max:255',
+        ]);
+
+        try {
+            $response = Http::baseUrl($this->baseUrl)
+                ->withHeaders([
+                    'x-public-key' => $this->publicKey,
+                    'x-private-key' => $this->privateKey,
+                ])
+                ->acceptJson()
+                ->asJson()
+                ->timeout(30)
+                ->retry(2, sleepMilliseconds: 500, throw: false)
+                ->post('/api/v1/merchants/payout', [
+                    'amount' => $validated['amount'],
+                    'accountNumber' => $validated['accountNumber'],
+                    'bankCode' => $validated['bankCode'],
+                    'accountName' => $validated['accountName'],
+                    'narration' => $validated['narration'],
+                ]);
+
+            Log::info('9PSB payoutToBank response', [
+                'status' => $response->status(),
+                'body' => $response->json() ?? $response->body(),
+                'payload' => $validated,
+            ]);
+
+            if ($response->successful()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Payout initiated successfully',
+                    'data' => $response->json(),
+                ], $response->status());
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => $response->json('message') ?? 'Payout request failed',
+                'errors' => $response->json('errors') ?? [],
+            ], $response->status() ?: 500);
+
+        } catch (\Exception $e) {
+            Log::error('9PSB payoutToBank exception', [
+                'error' => $e->getMessage(),
+                'payload' => $validated,
+            ]);
+
+            return $this->errorResponse('Payout failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Get Banks List — all Nigerian banks and their codes
+    // GET /api/v1/banks
+    // -------------------------------------------------------------------------
+    public function getBanks(): JsonResponse
+    {
+        try {
+            $response = Http::baseUrl($this->baseUrl)
+                ->withHeaders([
+                    'x-public-key' => $this->publicKey,
+                    'x-private-key' => $this->privateKey,
+                ])
+                ->acceptJson()
+                ->timeout(15)
+                ->retry(2, sleepMilliseconds: 500, throw: false)
+                ->get('/api/v1/banks');
+
+            Log::info('9PSB getBanks response', [
+                'status' => $response->status(),
+            ]);
+
+            if ($response->successful()) {
+                return response()->json([
+                    'success' => true,
+                    'data' => $response->json('data') ?? $response->json(),
+                ]);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => $response->json('message') ?? 'Failed to fetch banks list',
+            ], $response->status() ?: 500);
+
+        } catch (\Exception $e) {
+            Log::error('9PSB getBanks exception', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->errorResponse('Failed to retrieve banks: ' . $e->getMessage(), 500);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Record the wallet movement in WalletTransaction table
     // Call this AFTER a successful 9PSB API debit/credit to keep local DB in sync
     // -------------------------------------------------------------------------

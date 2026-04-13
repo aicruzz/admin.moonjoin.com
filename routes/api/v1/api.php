@@ -24,6 +24,8 @@ Route::group(['namespace' => 'Api\V1', 'middleware' => 'localization'], function
         Route::group(['prefix' => 'wallet', 'middleware' => ['auth:api']], function () {
             Route::post('virtual-account', 'NinePsbPaymentController@createVirtualAccount');
             Route::post('transaction', 'NinePsbPaymentController@initiateTransaction');
+            Route::post('payout', 'NinePsbPaymentController@payoutDeliveryManToBank');
+            Route::get('banks', 'NinePsbPaymentController@getBanks');
         }
         );
         Route::group(['prefix' => 'configurations'], function () {
