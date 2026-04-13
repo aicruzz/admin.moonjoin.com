@@ -1510,25 +1510,54 @@ class DeliverymanController extends Controller
 
         if ($w?->balance >= $request['amount']) {
 
-            $data = [
-                'delivery_man_id' => $w?->delivery_man_id,
-                'amount' => $request['amount'],
-                'transaction_note' => null,
-                'sender_note' => $request['sender_note'],
-                'withdrawal_method_id' => $request['id'],
-                'withdrawal_method_fields' => json_encode($method_data),
-                'approved' => 0,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ];
-
             try {
-                DB::table('withdraw_requests')->insert($data);
-                $w?->increment('pending_withdraw', $request['amount']);
+                // ---------------------------------------------------------------
+                // IDEMPOTENCY LOCK
+                // Lock the wallet row so only ONE request can proceed at a time
+                // for this delivery man. Any concurrent retry will wait, then
+                // hit the existingPending check and reuse the same record.
+                // ---------------------------------------------------------------
+                $withdraw = DB::transaction(function () use ($w, $request, $method_data) {
 
-                $withdraw = WithdrawRequest::where('delivery_man_id', $w->delivery_man_id)
-                    ->latest()
-                    ->first();
+                    // Lock this DM's wallet row for the duration of the transaction
+                    $wallet = \App\Models\DeliveryManWallet::where('delivery_man_id', $w->delivery_man_id)
+                        ->lockForUpdate()
+                        ->first();
+
+                    // Check for a pending withdraw created in last 2 minutes
+                    $existing = WithdrawRequest::where('delivery_man_id', $wallet->delivery_man_id)
+                        ->where('amount', $request['amount'])
+                        ->where('approved', 0)
+                        ->where('created_at', '>=', now()->subMinutes(2))
+                        ->first();
+
+                    if ($existing) {
+                        \Log::warning('IDEMPOTENCY - Reusing existing withdraw request', [
+                            'withdraw_id' => $existing->id,
+                        ]);
+                        return $existing;
+                    }
+
+                    // Fresh insert — safe because wallet row is locked
+                    DB::table('withdraw_requests')->insert([
+                        'delivery_man_id' => $wallet->delivery_man_id,
+                        'amount' => $request['amount'],
+                        'transaction_note' => null,
+                        'sender_note' => $request['sender_note'],
+                        'withdrawal_method_id' => $request['id'],
+                        'withdrawal_method_fields' => json_encode($method_data),
+                        'approved' => 0,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+
+                    $wallet->increment('pending_withdraw', $request['amount']);
+
+                    return WithdrawRequest::where('delivery_man_id', $wallet->delivery_man_id)
+                        ->latest()
+                        ->first();
+
+                });
 
                 \Log::info('STEP 5 - WITHDRAW SAVED', [
                     'withdraw_id' => $withdraw->id,
@@ -1608,22 +1637,15 @@ class DeliverymanController extends Controller
 
                         \Log::info('STEP 8 - NAME ENQUIRY RESPONSE', $enquiryResponse ?? []);
 
-                        if (!isset($enquiryResponse['success']) || $enquiryResponse['success'] !== true) {
-                            \Log::error('STEP 8 FAILED - Name enquiry failed', [
-                                'message' => $enquiryResponse['message'] ?? 'Unknown',
-                                'raw' => $enquiryResponse,
-                            ]);
-                            goto send_notification;
-                        }
-
-                        // Extract account name from enquiryResponse
-                        $account_name = $enquiryResponse['data']['accountName']
+                        // Extract account name — handles both direct and wrapped responses
+                        $account_name = $enquiryResponse['data']['customer']['account']['name']
+                            ?? $enquiryResponse['raw']['data']['customer']['account']['name']
+                            ?? $enquiryResponse['data']['accountName']
                             ?? $enquiryResponse['data']['account_name']
-                            ?? $enquiryResponse['data']['customer']['account']['name']
                             ?? null;
 
                         if (!$account_name) {
-                            \Log::error('STEP 8 FAILED - Account name not found in enquiry response', [
+                            \Log::error('STEP 8 FAILED - Account name not found', [
                                 'raw' => $enquiryResponse,
                             ]);
                             goto send_notification;
@@ -1635,47 +1657,75 @@ class DeliverymanController extends Controller
                         ]);
 
                         // STEP 9 — Fire payout
-                        $payoutRequest = new \Illuminate\Http\Request();
-                        $payoutRequest->replace([
-                            'amount' => $withdraw->amount,
-                            'accountNumber' => $account_number,
-                            'bankCode' => $bank_code,
-                            'accountName' => $account_name,
-                            'narration' => 'DM Withdraw ID: ' . $withdraw->id,
-                        ]);
+                        // Re-fetch fresh from DB to guard against approved by another request
+                        $freshWithdraw = WithdrawRequest::find($withdraw->id);
 
-                        $payoutResponse = json_decode(
-                            $ninePsb->payoutDeliveryManToBank($payoutRequest)->getContent(),
-                            true
-                        );
-
-                        \Log::info('STEP 9 - PAYOUT RESPONSE', $payoutResponse ?? []);
-
-                        if (!isset($payoutResponse['success']) || $payoutResponse['success'] !== true) {
-                            \Log::error('STEP 9 FAILED - Payout failed', [
-                                'message' => $payoutResponse['message'] ?? 'Unknown',
-                                'raw' => $payoutResponse,
+                        if ($freshWithdraw->approved == 1) {
+                            \Log::warning('STEP 9 SKIPPED - Already approved, duplicate payout prevented', [
+                                'withdraw_id' => $withdraw->id,
                             ]);
                             goto send_notification;
                         }
 
-                        // STEP 10 — Auto approve
-                        $withdraw->approved = 1;
-                        $withdraw->transaction_note = 'Auto-paid via 9PSB to '
-                            . $account_name
-                            . ' (' . $bank_name . ') on '
-                            . now()->toDateTimeString();
-                        $withdraw->save();
+                        // Lock the withdraw row before paying to prevent race on payout
+                        DB::transaction(function () use ($freshWithdraw, $ninePsb, $account_number, $bank_code, $account_name, $bank_name, $w, &$withdraw) {
+                            $locked = WithdrawRequest::where('id', $freshWithdraw->id)
+                                ->where('approved', 0)
+                                ->lockForUpdate()
+                                ->first();
 
-                        $w->increment('total_withdrawn', $withdraw->amount);
-                        $w->decrement('pending_withdraw', $withdraw->amount);
+                            // Another process already approved it while we were waiting
+                            if (!$locked) {
+                                \Log::warning('STEP 9 SKIPPED INSIDE LOCK - Already approved', [
+                                    'withdraw_id' => $freshWithdraw->id,
+                                ]);
+                                return;
+                            }
 
-                        \Log::info('STEP 10 SUCCESS - AUTO APPROVED', [
-                            'withdraw_id' => $withdraw->id,
-                            'account_name' => $account_name,
-                            'bank_name' => $bank_name,
-                            'amount' => $withdraw->amount,
-                        ]);
+                            $payoutRequest = new \Illuminate\Http\Request();
+                            $payoutRequest->replace([
+                                'amount' => $locked->amount,
+                                'accountNumber' => $account_number,
+                                'bankCode' => $bank_code,
+                                'accountName' => $account_name,
+                                'narration' => 'DM Withdraw ID: ' . $locked->id,
+                            ]);
+
+                            $payoutResponse = json_decode(
+                                $ninePsb->payoutDeliveryManToBank($payoutRequest)->getContent(),
+                                true
+                            );
+
+                            \Log::info('STEP 9 - PAYOUT RESPONSE', $payoutResponse ?? []);
+
+                            if (!isset($payoutResponse['success']) || $payoutResponse['success'] !== true) {
+                                \Log::error('STEP 9 FAILED - Payout failed', [
+                                    'message' => $payoutResponse['message'] ?? 'Unknown',
+                                    'raw' => $payoutResponse,
+                                ]);
+                                return; // exits transaction, goto send_notification below
+                            }
+
+                            // STEP 10 — Auto approve inside the lock
+                            $locked->approved = 1;
+                            $locked->transaction_note = 'Auto-paid via 9PSB to '
+                                . $account_name
+                                . ' (' . $bank_name . ') on '
+                                . now()->toDateTimeString();
+                            $locked->save();
+
+                            $w->increment('total_withdrawn', $locked->amount);
+                            $w->decrement('pending_withdraw', $locked->amount);
+
+                            \Log::info('STEP 10 SUCCESS - AUTO APPROVED', [
+                                'withdraw_id' => $locked->id,
+                                'account_name' => $account_name,
+                                'bank_name' => $bank_name,
+                                'amount' => $locked->amount,
+                            ]);
+
+                            $withdraw = $locked;
+                        });
 
                     } catch (\Exception $e) {
                         \Log::error('9PSB EXCEPTION', [
