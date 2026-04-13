@@ -1461,7 +1461,6 @@ class DeliverymanController extends Controller
 
         return response()->json($temp, 200);
     }
-
     public function request_withdraw(Request $request)
     {
         \Log::info('STEP 1 - REQUEST HIT', $request->all());
@@ -1609,8 +1608,6 @@ class DeliverymanController extends Controller
 
                         \Log::info('STEP 8 - NAME ENQUIRY RESPONSE', $enquiryResponse ?? []);
 
-
-
                         if (!isset($enquiryResponse['success']) || $enquiryResponse['success'] !== true) {
                             \Log::error('STEP 8 FAILED - Name enquiry failed', [
                                 'message' => $enquiryResponse['message'] ?? 'Unknown',
@@ -1619,31 +1616,19 @@ class DeliverymanController extends Controller
                             goto send_notification;
                         }
 
-                        if ($response->successful()) {
-                            $body = $response->json();
-                            $account_name = $body['data']['accountName']
-                                ?? $body['data']['account_name']
-                                ?? $body['data']['customer']['account']['name']
-                                ?? null;
+                        // Extract account name from enquiryResponse
+                        $account_name = $enquiryResponse['data']['accountName']
+                            ?? $enquiryResponse['data']['account_name']
+                            ?? $enquiryResponse['data']['customer']['account']['name']
+                            ?? null;
 
-                            if (!$account_name) {
-                                return response()->json([
-                                    'success' => false,
-                                    'message' => 'Account name not found in 9PSB response',
-                                    'raw' => $body,
-                                ], 422);
-                            }
-
-                            return response()->json([
-                                'success' => true,
-                                'message' => 'Account name resolved successfully',
-                                'data' => [
-                                    'accountName' => $account_name,
-                                    'accountNumber' => $validated['accountNumber'],
-                                    'bankCode' => $validated['bankCode'],
-                                ],
+                        if (!$account_name) {
+                            \Log::error('STEP 8 FAILED - Account name not found in enquiry response', [
+                                'raw' => $enquiryResponse,
                             ]);
+                            goto send_notification;
                         }
+
                         \Log::info('STEP 8 SUCCESS - Account name resolved', [
                             'account_name' => $account_name,
                             'bank_name' => $bank_name,
