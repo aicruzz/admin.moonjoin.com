@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\CentralLogics\Helpers;
 use App\Models\User;
 use App\Models\WalletTransaction;
+use Illuminate\Support\Facades\Http;
 use App\Services\NinePsbService;
 use App\Notifications\WalletCredited;
 use Illuminate\Http\Request;
@@ -539,6 +540,75 @@ class NinePsbPaymentController extends Controller
             ]);
 
             return $this->errorResponse('Failed to retrieve banks: ' . $e->getMessage(), 500);
+        }
+    }
+
+    public function nameEnquiry(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'accountNumber' => 'required|string',
+            'bankCode' => 'required|string',
+        ]);
+
+        try {
+            $response = Http::baseUrl($this->baseUrl)
+                ->withHeaders([
+                    'x-public-key' => $this->publicKey,
+                    'x-private-key' => $this->privateKey,
+                ])
+                ->acceptJson()
+                ->asJson()
+                ->timeout(15)
+                ->retry(2, sleepMilliseconds: 500, throw: false)
+                ->post('/banks/enquiry', [
+                    'accountNumber' => $validated['accountNumber'],
+                    'bankCode' => $validated['bankCode'],
+                ]);
+
+            Log::info('9PSB nameEnquiry response', [
+                'status' => $response->status(),
+                'body' => $response->json() ?? $response->body(),
+                'accountNumber' => $validated['accountNumber'],
+                'bankCode' => $validated['bankCode'],
+            ]);
+
+            if ($response->successful()) {
+                $body = $response->json();
+                $account_name = $body['data']['accountName'] ?? null;
+
+                if (!$account_name) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Account name not found in 9PSB response',
+                        'raw' => $body,
+                    ], 422);
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Account name resolved successfully',
+                    'data' => [
+                        'accountName' => $account_name,
+                        'accountNumber' => $validated['accountNumber'],
+                        'bankCode' => $validated['bankCode'],
+                    ],
+                ]);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => $response->json('message') ?? 'Name enquiry failed',
+                'errors' => $response->json('errors') ?? [],
+            ], $response->status() ?: 500);
+
+        } catch (\Exception $e) {
+            Log::error('9PSB nameEnquiry exception', [
+                'error' => $e->getMessage(),
+                'accountNumber' => $validated['accountNumber'] ?? null,
+                'bankCode' => $validated['bankCode'] ?? null,
+            ]);
+
+            return $this->errorResponse('Name enquiry failed: ' . $e->getMessage(), 500);
         }
     }
 
