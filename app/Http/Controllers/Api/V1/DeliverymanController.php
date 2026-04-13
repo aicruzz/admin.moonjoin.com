@@ -1464,7 +1464,7 @@ class DeliverymanController extends Controller
 
     public function request_withdraw(Request $request)
     {
-        \Log::info('WITHDRAW REQUEST HIT', $request->all()); // ADD THIS
+        \Log::info('STEP 1 - REQUEST HIT', $request->all());
 
         $validator = Validator::make($request->all(), [
             'amount' => 'required|numeric|min:0.01',
@@ -1472,11 +1472,20 @@ class DeliverymanController extends Controller
         ]);
 
         if ($validator->fails()) {
+            \Log::error('STEP 1 FAILED - VALIDATION', ['errors' => $validator->errors()->toArray()]);
             return response()->json(['errors' => Helpers::error_processor($validator)], 403);
         }
 
         $dm = DeliveryMan::where(['auth_token' => $request['token']])->first();
         $method = WithdrawalMethod::find($request['id']);
+
+        \Log::info('STEP 2 - METHOD AND DM', [
+            'method_id' => $method->id ?? 'NULL',
+            'method_name' => $method->method_name ?? 'NULL',
+            'method_fields' => $method->method_fields ?? 'NULL',
+            'dm_id' => $dm->id ?? 'NULL',
+        ]);
+
         $fields = array_column($method->method_fields, 'input_name');
         $values = $request->all();
 
@@ -1487,7 +1496,18 @@ class DeliverymanController extends Controller
             }
         }
 
+        \Log::info('STEP 3 - METHOD DATA CAPTURED', [
+            'method_data' => $method_data,
+            'account_number' => $method_data['account_number'] ?? 'NOT FOUND',
+        ]);
+
         $w = $dm?->wallet;
+
+        \Log::info('STEP 4 - WALLET CHECK', [
+            'wallet_balance' => $w?->balance ?? 'NULL',
+            'requested_amount' => $request['amount'],
+            'has_enough' => ($w?->balance >= $request['amount']) ? 'YES' : 'NO',
+        ]);
 
         if ($w?->balance >= $request['amount']) {
 
@@ -1504,67 +1524,78 @@ class DeliverymanController extends Controller
             ];
 
             try {
-                // Save the withdrawal request first
                 DB::table('withdraw_requests')->insert($data);
                 $w?->increment('pending_withdraw', $request['amount']);
 
-                // Fetch the just-inserted record
                 $withdraw = WithdrawRequest::where('delivery_man_id', $w->delivery_man_id)
                     ->latest()
                     ->first();
 
-                // =============================================
+                \Log::info('STEP 5 - WITHDRAW SAVED', [
+                    'withdraw_id' => $withdraw->id,
+                    'amount' => $withdraw->amount,
+                    'approved' => $withdraw->approved,
+                ]);
+
                 // 9PSB AUTO-PAYOUT
-                // =============================================
                 $account_number = $method_data['account_number'] ?? null;
                 $method_name = strtolower(trim($method->method_name ?? ''));
+                $bank_code_from_form = $method_data['bank_code'] ?? null;
 
                 $bankCodeMap = [
                     'opay' => '100004',
                     'palmpay' => '100033',
                     'airpero' => '090133',
-                    'bank transfer' => null,
+                    'bank transfer' => $bank_code_from_form ?? '100004',
                 ];
 
-                $bank_code = $bankCodeMap[$method_name] ?? null;
+                $bank_code = $bankCodeMap[$method_name] ?? '100004';
+
+                \Log::info('STEP 6 - BANK CODE LOOKUP', [
+                    'method_name' => $method_name,
+                    'bank_code' => $bank_code ?? 'NOT MAPPED',
+                    'account_number' => $account_number ?? 'NULL',
+                ]);
 
                 if ($account_number && $bank_code) {
                     try {
                         $ninePsb = new \App\Http\Controllers\Api\V1\NinePsbPaymentController();
 
-                        // STEP 1 — Verify bank code exists in 9PSB
-                        $banksResponse = json_decode(
-                            $ninePsb->getBanks()->getContent(),
-                            true
-                        );
+                        // STEP 7 — Get bank list
+                        $banksRaw = json_decode($ninePsb->getBanks()->getContent(), true);
 
-                        if (!isset($banksResponse['success']) || $banksResponse['success'] !== true) {
-                            \Log::error('9PSB getBanks failed', [
-                                'withdraw_id' => $withdraw->id,
-                                'message' => $banksResponse['message'] ?? 'Unknown',
-                            ]);
-                            goto send_notification;
-                        }
+                        \Log::info('STEP 7 - GET BANKS RESPONSE', [
+                            'success' => $banksRaw['success'] ?? 'NULL',
+                            'data_keys' => array_keys($banksRaw['data'] ?? []),
+                        ]);
 
-                        $bankList = $banksResponse['data']['data']['data']['bankList']
-                            ?? $banksResponse['data']['data']['bankList']
-                            ?? $banksResponse['data']['bankList']
+                        $bankList = $banksRaw['data']['data']['bankList']
+                            ?? $banksRaw['data']['bankList']
+                            ?? $banksRaw['data']['data']['data']['bankList']
                             ?? [];
+
+                        \Log::info('STEP 7B - BANK LIST COUNT', [
+                            'count' => count($bankList),
+                        ]);
 
                         $matchedBank = collect($bankList)->firstWhere('bankCode', $bank_code);
 
+                        \Log::info('STEP 7C - BANK MATCH', [
+                            'bank_code' => $bank_code,
+                            'matched_bank' => $matchedBank ?? 'NOT FOUND',
+                        ]);
+
                         if (!$matchedBank) {
-                            \Log::error('9PSB bank code not matched', [
-                                'withdraw_id' => $withdraw->id,
+                            \Log::error('STEP 7 FAILED - Bank code not found', [
                                 'bank_code' => $bank_code,
-                                'method' => $method_name,
+                                'method_name' => $method_name,
                             ]);
                             goto send_notification;
                         }
 
                         $bank_name = $matchedBank['bankName'];
 
-                        // STEP 2 — Resolve account name via /banks/enquiry
+                        // STEP 8 — Name enquiry
                         $enquiryRequest = new \Illuminate\Http\Request();
                         $enquiryRequest->replace([
                             'accountNumber' => $account_number,
@@ -1576,26 +1607,49 @@ class DeliverymanController extends Controller
                             true
                         );
 
+                        \Log::info('STEP 8 - NAME ENQUIRY RESPONSE', $enquiryResponse ?? []);
+
+
+
                         if (!isset($enquiryResponse['success']) || $enquiryResponse['success'] !== true) {
-                            \Log::error('9PSB nameEnquiry failed', [
-                                'withdraw_id' => $withdraw->id,
-                                'account_number' => $account_number,
+                            \Log::error('STEP 8 FAILED - Name enquiry failed', [
                                 'message' => $enquiryResponse['message'] ?? 'Unknown',
-                            ]);
-                            goto send_notification;
-                        }
-
-                        $account_name = $enquiryResponse['data']['accountName'] ?? null;
-
-                        if (!$account_name) {
-                            \Log::error('9PSB nameEnquiry returned no account name', [
-                                'withdraw_id' => $withdraw->id,
                                 'raw' => $enquiryResponse,
                             ]);
                             goto send_notification;
                         }
 
-                        // STEP 3 — Fire the payout
+                        if ($response->successful()) {
+                            $body = $response->json();
+                            $account_name = $body['data']['accountName']
+                                ?? $body['data']['account_name']
+                                ?? $body['data']['customer']['account']['name']
+                                ?? null;
+
+                            if (!$account_name) {
+                                return response()->json([
+                                    'success' => false,
+                                    'message' => 'Account name not found in 9PSB response',
+                                    'raw' => $body,
+                                ], 422);
+                            }
+
+                            return response()->json([
+                                'success' => true,
+                                'message' => 'Account name resolved successfully',
+                                'data' => [
+                                    'accountName' => $account_name,
+                                    'accountNumber' => $validated['accountNumber'],
+                                    'bankCode' => $validated['bankCode'],
+                                ],
+                            ]);
+                        }
+                        \Log::info('STEP 8 SUCCESS - Account name resolved', [
+                            'account_name' => $account_name,
+                            'bank_name' => $bank_name,
+                        ]);
+
+                        // STEP 9 — Fire payout
                         $payoutRequest = new \Illuminate\Http\Request();
                         $payoutRequest->replace([
                             'amount' => $withdraw->amount,
@@ -1610,25 +1664,28 @@ class DeliverymanController extends Controller
                             true
                         );
 
+                        \Log::info('STEP 9 - PAYOUT RESPONSE', $payoutResponse ?? []);
+
                         if (!isset($payoutResponse['success']) || $payoutResponse['success'] !== true) {
-                            \Log::error('9PSB payout failed', [
-                                'withdraw_id' => $withdraw->id,
+                            \Log::error('STEP 9 FAILED - Payout failed', [
                                 'message' => $payoutResponse['message'] ?? 'Unknown',
+                                'raw' => $payoutResponse,
                             ]);
                             goto send_notification;
                         }
 
-                        // STEP 4 — Money sent, flip status to approved automatically
+                        // STEP 10 — Auto approve
                         $withdraw->approved = 1;
                         $withdraw->transaction_note = 'Auto-paid via 9PSB to '
-                            . $account_name . ' (' . $bank_name . ') on '
+                            . $account_name
+                            . ' (' . $bank_name . ') on '
                             . now()->toDateTimeString();
                         $withdraw->save();
 
                         $w->increment('total_withdrawn', $withdraw->amount);
                         $w->decrement('pending_withdraw', $withdraw->amount);
 
-                        \Log::info('9PSB auto-payout successful', [
+                        \Log::info('STEP 10 SUCCESS - AUTO APPROVED', [
                             'withdraw_id' => $withdraw->id,
                             'account_name' => $account_name,
                             'bank_name' => $bank_name,
@@ -1636,24 +1693,31 @@ class DeliverymanController extends Controller
                         ]);
 
                     } catch (\Exception $e) {
-                        \Log::error('9PSB auto-payout exception', [
+                        \Log::error('9PSB EXCEPTION', [
                             'withdraw_id' => $withdraw->id,
                             'error' => $e->getMessage(),
+                            'line' => $e->getLine(),
+                            'file' => $e->getFile(),
                         ]);
-                        // stays pending — admin handles manually
                     }
+                } else {
+                    \Log::warning('STEP 6 SKIPPED - No account number or bank code', [
+                        'account_number' => $account_number ?? 'NULL',
+                        'bank_code' => $bank_code ?? 'NULL',
+                        'method_name' => $method_name,
+                    ]);
                 }
-                // =============================================
-                // END 9PSB AUTO-PAYOUT
-                // =============================================
 
                 send_notification:
 
-                // Always notify admin
                 $mail_status = Helpers::get_mail_status('dm_withdraw_request_mail_status_admin');
                 $admin = Admin::where('role_id', 1)->first();
 
-                if (config('mail.status') && $mail_status == '1' && Helpers::getNotificationStatusData('admin', 'dm_withdraw_request', 'mail_status')) {
+                if (
+                    config('mail.status')
+                    && $mail_status == '1'
+                    && Helpers::getNotificationStatusData('admin', 'dm_withdraw_request', 'mail_status')
+                ) {
                     Mail::to($admin->email)->send(new WithdrawRequestMail('admin_mail', $withdraw, 'dm'));
                 }
 
@@ -1662,6 +1726,11 @@ class DeliverymanController extends Controller
                 ], 200);
 
             } catch (\Exception $e) {
+                \Log::error('WITHDRAW REQUEST EXCEPTION', [
+                    'error' => $e->getMessage(),
+                    'line' => $e->getLine(),
+                    'file' => $e->getFile(),
+                ]);
                 info($e->getMessage());
                 return response()->json($e);
             }

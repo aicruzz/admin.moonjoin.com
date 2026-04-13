@@ -560,7 +560,7 @@ class NinePsbPaymentController extends Controller
                 ->asJson()
                 ->timeout(15)
                 ->retry(2, sleepMilliseconds: 500, throw: false)
-                ->post('/banks/enquiry', [
+                ->post('/api/v1/banks/enquiry', [
                     'accountNumber' => $validated['accountNumber'],
                     'bankCode' => $validated['bankCode'],
                 ]);
