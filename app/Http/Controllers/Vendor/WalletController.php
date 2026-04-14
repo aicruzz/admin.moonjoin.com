@@ -51,7 +51,6 @@ class WalletController extends Controller
             'amount' => 'required|numeric|min:0.01',
             'account_number' => 'required|string|size:10',
             'bank_code' => 'nullable|string',
-            'account_name' => 'required|string|max:255',
             'narration' => 'nullable|string|max:255',
         ]);
 
@@ -335,10 +334,7 @@ class WalletController extends Controller
                     'narration' => 'Vendor Withdraw ID: ' . $locked->id,  // satisfies required|string
                 ]);
 
-                $payoutResponse = json_decode(
-                    $ninePsb->payoutStoreToBank($payoutRequest)->getContent(),  // ← correct method
-                    true
-                );
+                $payoutResponse = $ninePsb->payoutStoreToBank($payoutRequest);
 
                 \Log::info('9PSB VENDOR | STEP 9 - PAYOUT RESPONSE', $payoutResponse ?? []);
 
