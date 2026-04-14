@@ -879,14 +879,24 @@ class VendorController extends Controller
             'vendor' => $request['vendor']?->id,
             'payload' => $request->all(),
         ]);
+
+
         $validator = Validator::make($request->all(), [
             'amount' => 'required|numeric|min:0.01',
-            'id' => 'required'
+            'id' => 'required',
+            'accountNumber' => 'required|string|size:10',
+            'bankCode' => 'required|string',
+            'accountName' => 'required|string|max:255',
+            'narration' => 'required|string|max:255',
         ]);
+
         if ($validator->fails()) {
             return response()->json(['errors' => Helpers::error_processor($validator)], 403);
         }
 
+        // -------------------------------------------------------------------------
+        // Step 2: Build withdrawal method fields
+        // -------------------------------------------------------------------------
         $method = WithdrawalMethod::find($request['id']);
         $fields = array_column($method->method_fields, 'input_name');
         $values = $request->all();
@@ -898,40 +908,249 @@ class VendorController extends Controller
             }
         }
 
+        // -------------------------------------------------------------------------
+        // Step 3: Early balance check (fast exit before any API calls)
+        // -------------------------------------------------------------------------
         $w = $request['vendor']?->wallet;
-        if ($w?->balance >= $request['amount']) {
-            $data = [
+
+        if (!($w?->balance >= $request['amount'])) {
+            return response()->json([
+                'errors' => [
+                    ['code' => 'amount', 'message' => translate('messages.insufficient_balance')]
+                ]
+            ], 403);
+        }
+
+        // -------------------------------------------------------------------------
+        // Step 4: Name Enquiry — verify account number + bank code before payout
+        // -------------------------------------------------------------------------
+        try {
+            $enquiryResponse = Http::baseUrl($this->baseUrl)
+                ->withHeaders([
+                    'x-public-key' => $this->publicKey,
+                    'x-private-key' => $this->privateKey,
+                ])
+                ->acceptJson()
+                ->asJson()
+                ->timeout(15)
+                ->retry(2, sleepMilliseconds: 500, throw: false)
+                ->post('/api/v1/banks/enquiry', [
+                    'accountNumber' => $request['accountNumber'],
+                    'bankCode' => $request['bankCode'],
+                ]);
+
+            Log::channel('daily')->info('9PSB nameEnquiry response', [
+                'status' => $enquiryResponse->status(),
+                'body' => $enquiryResponse->json() ?? $enquiryResponse->body(),
+                'accountNumber' => $request['accountNumber'],
+                'bankCode' => $request['bankCode'],
+                'vendor' => $w?->vendor_id,
+            ]);
+
+            if (!$enquiryResponse->successful()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $enquiryResponse->json('message') ?? 'Bank account verification failed',
+                    'errors' => $enquiryResponse->json('errors') ?? [],
+                ], $enquiryResponse->status() ?: 500);
+            }
+
+            $resolvedName = $enquiryResponse->json('data.accountName');
+
+            if (!$resolvedName) {
+                return response()->json([
+                    'errors' => [
+                        ['code' => 'accountName', 'message' => 'Account name could not be resolved. Please check your account number and bank.']
+                    ]
+                ], 422);
+            }
+
+            // Compare resolved name against what the vendor submitted
+            // Using similar_text for fuzzy match — handles minor spacing/case differences
+            similar_text(
+                strtolower(trim($resolvedName)),
+                strtolower(trim($request['accountName'])),
+                $matchPercent
+            );
+
+            Log::channel('daily')->info('9PSB name match check', [
+                'resolved' => $resolvedName,
+                'submitted' => $request['accountName'],
+                'match_percent' => $matchPercent,
+                'vendor' => $w?->vendor_id,
+            ]);
+
+            if ($matchPercent < 70) {
+                return response()->json([
+                    'errors' => [
+                        [
+                            'code' => 'accountName',
+                            'message' => 'Account name does not match. Expected: ' . $resolvedName
+                        ]
+                    ]
+                ], 422);
+            }
+
+            // Use the bank-verified name for the actual payout (not user-submitted)
+            $verifiedAccountName = $resolvedName;
+
+        } catch (\Exception $e) {
+            Log::channel('daily')->error('9PSB nameEnquiry exception', [
+                'error' => $e->getMessage(),
+                'accountNumber' => $request['accountNumber'],
+                'bankCode' => $request['bankCode'],
+                'vendor' => $w?->vendor_id,
+            ]);
+
+            return response()->json([
+                'errors' => [
+                    ['code' => 'enquiry', 'message' => 'Account verification failed: ' . $e->getMessage()]
+                ]
+            ], 500);
+        }
+
+        // -------------------------------------------------------------------------
+        // Step 5: Fire 9PSB payout — using verified account name from enquiry
+        // -------------------------------------------------------------------------
+        try {
+            $payoutResponse = Http::baseUrl($this->baseUrl)
+                ->withHeaders([
+                    'x-public-key' => $this->publicKey,
+                    'x-private-key' => $this->privateKey,
+                ])
+                ->acceptJson()
+                ->asJson()
+                ->timeout(30)
+                ->retry(2, sleepMilliseconds: 500, throw: false)
+                ->post('/api/v1/merchants/payout', [
+                    'amount' => $request['amount'],
+                    'accountNumber' => $request['accountNumber'],
+                    'bankCode' => $request['bankCode'],
+                    'accountName' => $verifiedAccountName, // bank-verified, not user-submitted
+                    'narration' => $request['narration'],
+                ]);
+
+            Log::channel('daily')->info('9PSB payoutToBank response', [
+                'status' => $payoutResponse->status(),
+                'body' => $payoutResponse->json() ?? $payoutResponse->body(),
+                'vendor' => $w?->vendor_id,
+                'amount' => $request['amount'],
+            ]);
+
+            if (!$payoutResponse->successful()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $payoutResponse->json('message') ?? 'Payout request failed',
+                    'errors' => $payoutResponse->json('errors') ?? [],
+                ], $payoutResponse->status() ?: 500);
+            }
+
+        } catch (\Exception $e) {
+            Log::channel('daily')->error('9PSB payoutToBank exception', [
+                'error' => $e->getMessage(),
+                'vendor' => $w?->vendor_id,
+                'amount' => $request['amount'],
+            ]);
+
+            return response()->json([
+                'errors' => [
+                    ['code' => 'payout', 'message' => 'Bank transfer failed: ' . $e->getMessage()]
+                ]
+            ], 500);
+        }
+
+        // -------------------------------------------------------------------------
+        // Step 6: Payout succeeded — write to DB inside lock + transaction
+        // -------------------------------------------------------------------------
+        $data = [
+            'vendor_id' => $w?->vendor_id,
+            'amount' => $request['amount'],
+            'transaction_note' => null,
+            'withdrawal_method_id' => $request['id'],
+            'withdrawal_method_fields' => json_encode($method_data),
+            'approved' => 1,   // auto-approved — payout already done
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+
+        try {
+            DB::transaction(function () use ($data, $w, $request) {
+                // Lock wallet row — prevents race condition from concurrent requests
+                $wallet = \App\Models\VendorWallet::where('vendor_id', $w->vendor_id)
+                    ->lockForUpdate()
+                    ->first();
+
+                // Re-check balance inside the lock (authoritative check)
+                if ($wallet->balance < $request['amount']) {
+                    throw new \Exception('insufficient_balance');
+                }
+
+                // Insert as approved=1 — payout is already complete
+                DB::table('withdraw_requests')->insert($data);
+
+                // Deduct balance immediately (no pending state needed)
+                $wallet->decrement('balance', $request['amount']);
+            });
+
+            // -------------------------------------------------------------------------
+            // Step 7: Send notification emails (unchanged from your original logic)
+            // -------------------------------------------------------------------------
+            $mail_status = Helpers::get_mail_status('withdraw_request_mail_status_admin');
+            $admin = \App\Models\Admin::where('role_id', 1)->first();
+            $wallet_transaction = WithdrawRequest::where('vendor_id', $w->vendor_id)->latest()->first();
+
+            if (
+                $request['vendor']?->stores[0]?->module?->module_type !== 'rental' &&
+                config('mail.status') &&
+                $mail_status == '1' &&
+                Helpers::getNotificationStatusData('admin', 'withdraw_request', 'mail_status')
+            ) {
+                Mail::to($admin->email)->send(new WithdrawRequestMail('admin_mail', $wallet_transaction));
+
+            } elseif (
+                $request['vendor']?->stores[0]?->module?->module_type == 'rental' &&
+                addon_published_status('Rental') &&
+                config('mail.status') &&
+                Helpers::get_mail_status('rental_withdraw_request_mail_status_admin') == '1' &&
+                Helpers::getRentalNotificationStatusData('admin', 'provider_withdraw_request', 'mail_status')
+            ) {
+                Mail::to($admin->email)->send(new ProviderWithdrawRequestMail('pending', $wallet_transaction));
+            }
+
+            return response()->json([
+                'message' => translate('messages.withdraw_request_placed_successfully'),
+                'data' => $payoutResponse->json(),
+            ], 200);
+
+        } catch (\Exception $e) {
+            if ($e->getMessage() === 'insufficient_balance') {
+                Log::channel('daily')->critical('9PSB payout sent but balance insufficient inside lock', [
+                    'vendor_id' => $w?->vendor_id,
+                    'amount' => $request['amount'],
+                    'payout' => $payoutResponse->json(),
+                ]);
+
+                return response()->json([
+                    'errors' => [
+                        ['code' => 'amount', 'message' => translate('messages.insufficient_balance')]
+                    ]
+                ], 403);
+            }
+
+            // Payout went through but DB write failed — critical discrepancy
+            Log::channel('daily')->critical('9PSB payout succeeded but DB record failed', [
                 'vendor_id' => $w?->vendor_id,
                 'amount' => $request['amount'],
-                'transaction_note' => null,
-                'withdrawal_method_id' => $request['id'],
-                'withdrawal_method_fields' => json_encode($method_data),
-                'approved' => 0,
-                'created_at' => now(),
-                'updated_at' => now()
-            ];
-            try {
-                DB::table('withdraw_requests')->insert($data);
-                $w?->increment('pending_withdraw', $request['amount']);
-                $mail_status = Helpers::get_mail_status('withdraw_request_mail_status_admin');
-                $admin = \App\Models\Admin::where('role_id', 1)->first();
-                $wallet_transaction = WithdrawRequest::where('vendor_id', $w->vendor_id)->latest()->first();
-                if ($request['vendor']?->stores[0]?->module?->module_type !== 'rental' && config('mail.status') && $mail_status == '1' && Helpers::getNotificationStatusData('admin', 'withdraw_request', 'mail_status')) {
-                    Mail::to($admin->email)->send(new WithdrawRequestMail('admin_mail', $wallet_transaction));
-                } elseif ($request['vendor']?->stores[0]?->module?->module_type == 'rental' && addon_published_status('Rental') && config('mail.status') && Helpers::get_mail_status('rental_withdraw_request_mail_status_admin') == '1' && Helpers::getRentalNotificationStatusData('admin', 'provider_withdraw_request', 'mail_status')) {
-                    Mail::to($admin->email)->send(new ProviderWithdrawRequestMail('pending', $wallet_transaction));
-                }
-                return response()->json(['message' => translate('messages.withdraw_request_placed_successfully')], 200);
-            } catch (\Exception $e) {
-                info($e->getMessage());
-                return response()->json($e);
-            }
+                'payout' => $payoutResponse->json(),
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'errors' => [
+                    ['code' => 'db_error', 'message' => 'Payment was sent but record could not be saved. Please contact support.']
+                ]
+            ], 500);
         }
-        return response()->json([
-            'errors' => [
-                ['code' => 'amount', 'message' => translate('messages.insufficient_balance')]
-            ]
-        ], 403);
     }
 
     public function remove_account(Request $request)
