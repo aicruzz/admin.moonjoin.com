@@ -438,7 +438,68 @@ class NinePsbPaymentController extends Controller
 
         return true;
     }
+    // -------------------------------------------------------------------------
+    // Vendor/Store Payout — real-time bank transfer via 9PSB
+    // POST /api/v1/merchants/payout - (9pSb endpoint)
+    // -------------------------------------------------------------------------
 
+    public function payoutStoreToBank(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'amount' => 'required|numeric|min:1',
+            'accountNumber' => 'required|string|size:10',
+            'bankCode' => 'required|string',
+            'accountName' => 'required|string|max:255',
+            'narration' => 'required|string|max:255',
+        ]);
+
+        try {
+            $response = Http::baseUrl($this->baseUrl)
+                ->withHeaders([
+                    'x-public-key' => $this->publicKey,
+                    'x-private-key' => $this->privateKey,
+                ])
+                ->acceptJson()
+                ->asJson()
+                ->timeout(30)
+                ->retry(2, sleepMilliseconds: 500, throw: false)
+                ->post('/api/v1/merchants/payout', [
+                    'amount' => $validated['amount'],
+                    'accountNumber' => $validated['accountNumber'],
+                    'bankCode' => $validated['bankCode'],
+                    'accountName' => $validated['accountName'],
+                    'narration' => $validated['narration'],
+                ]);
+
+            Log::info('9PSB payoutToBank response', [
+                'status' => $response->status(),
+                'body' => $response->json() ?? $response->body(),
+                'payload' => $validated,
+            ]);
+
+            if ($response->successful()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Payout initiated successfully',
+                    'data' => $response->json(),
+                ], $response->status());
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => $response->json('message') ?? 'Payout request failed',
+                'errors' => $response->json('errors') ?? [],
+            ], $response->status() ?: 500);
+
+        } catch (\Exception $e) {
+            Log::error('9PSB payoutToBank exception', [
+                'error' => $e->getMessage(),
+                'payload' => $validated,
+            ]);
+
+            return $this->errorResponse('Payout failed: ' . $e->getMessage(), 500);
+        }
+    }
     // -------------------------------------------------------------------------
     // Deliveryman Payout — real-time bank transfer via 9PSB
     // POST /api/v1/merchants/payout - (9pSb endpoint)
