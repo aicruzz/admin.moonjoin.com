@@ -106,7 +106,7 @@ class WalletController extends Controller
                         'updated_at' => now()
                     ];
                     DB::table('withdraw_requests')->insert($data);
-                    
+
                     $wallet->increment('pending_withdraw', $request['amount']);
 
                     return WithdrawRequest::where('vendor_id', $wallet->vendor_id)
