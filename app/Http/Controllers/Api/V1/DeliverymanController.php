@@ -1572,20 +1572,25 @@ class DeliverymanController extends Controller
 
                 $bankCodeMap = [
                     'opay' => '100004',
+                    'moniepoint' => '090405',
                     'palmpay' => '100033',
-                    'airpero' => '090133',
-                    'bank transfer' => $bank_code_from_form ?? '100004',
+                    'smartcash psb' => '120001',
+                    'access bank plc' => '000014',
+                    'united bank for africa' => '000004',
+                    'kuda microfinance bank' => '090267',
+                    'airpero' => '120001',
+                    'bank transfer' => $bank_code_from_form,
                 ];
 
-                $bank_code = $bankCodeMap[$method_name] ?? '100004';
+                $bank_code = $bankCodeMap[$method_name] ?? $bank_code_from_form;
 
                 \Log::info('STEP 6 - BANK CODE LOOKUP', [
                     'method_name' => $method_name,
-                    'bank_code' => $bank_code ?? 'NOT MAPPED',
+                    'bank_code' => $bank_code ?? 'NOT MAPPED YET',
                     'account_number' => $account_number ?? 'NULL',
                 ]);
 
-                if ($account_number && $bank_code) {
+                if ($account_number) {
                     try {
                         $ninePsb = new \App\Http\Controllers\Api\V1\NinePsbPaymentController();
 
@@ -1606,14 +1611,38 @@ class DeliverymanController extends Controller
                             'count' => count($bankList),
                         ]);
 
-                        $matchedBank = collect($bankList)->firstWhere('bankCode', $bank_code);
+                        $matchedBank = null;
+                        if ($bank_code) {
+                            $matchedBank = collect($bankList)->firstWhere('bankCode', $bank_code);
+                        }
+
+                        // Fuzzy match if no direct bank_code match
+                        if (!$matchedBank && $method_name) {
+                            $matchedBank = collect($bankList)->first(function ($b) use ($method_name) {
+                                $apiName = strtolower(trim($b['bankName'] ?? ''));
+                                if (str_contains($apiName, $method_name) || str_contains($method_name, $apiName)) {
+                                    return true;
+                                }
+                                if ($method_name === 'united bank for africa' && in_array($apiName, ['uba', 'united bank for africa'])) {
+                                    return true;
+                                }
+                                if (str_contains($method_name, 'smartcash') && str_contains($apiName, 'smartcash')) {
+                                    return true;
+                                }
+                                return false;
+                            });
+
+                            if ($matchedBank) {
+                                $bank_code = $matchedBank['bankCode'];
+                            }
+                        }
 
                         \Log::info('STEP 7C - BANK MATCH', [
                             'bank_code' => $bank_code,
                             'matched_bank' => $matchedBank ?? 'NOT FOUND',
                         ]);
 
-                        if (!$matchedBank) {
+                        if (!$matchedBank || !$bank_code) {
                             \Log::error('STEP 7 FAILED - Bank code not found', [
                                 'bank_code' => $bank_code,
                                 'method_name' => $method_name,
