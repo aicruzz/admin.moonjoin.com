@@ -39,404 +39,276 @@ class WalletController extends Controller
         $withdraw_req = WithdrawRequest::with(['vendor', 'method'])->where('vendor_id', Helpers::get_vendor_id())->latest()->paginate(config('default_pagination'));
         return view('vendor-views.wallet.index', compact('withdraw_req', 'withdrawal_methods', 'data'));
     }
+
     public function w_request(Request $request)
     {
-        // =========================================================================
-        // Step 1 — Validate inputs
-        // =========================================================================
-        \Log::info('9PSB VENDOR | STEP 1 - REQUEST HIT', $request->all());
+        \Log::info('VENDOR WITHDRAW STEP 1 - REQUEST HIT', $request->all());
 
-        $validator = Validator::make($request->all(), [
-            'withdraw_method' => 'required',
-            'amount' => 'required|numeric|min:0.01',
-            'account_number' => 'required|string|size:10',
-            'bank_code' => 'nullable|string',
-            'narration' => 'nullable|string|max:255',
-        ]);
-
-        if ($validator->fails()) {
-            \Log::error('9PSB VENDOR | STEP 1 FAILED - VALIDATION', [
-                'errors' => $validator->errors()->toArray(),
-            ]);
-            Toastr::error($validator->errors()->first());
-            return redirect()->back();
-        }
-
-        \Log::info('9PSB VENDOR | STEP 1 PASSED - VALIDATION OK');
-
-        // =========================================================================
-        // Step 2 — Load withdrawal method + build method_data
-        // =========================================================================
-        $method = WithdrawalMethod::find($request->withdraw_method);
-
-        if (!$method) {
-            \Log::error('9PSB VENDOR | STEP 2 FAILED - Method not found', [
-                'withdraw_method' => $request->withdraw_method,
-            ]);
-            Toastr::error('Invalid withdrawal method selected.');
-            return redirect()->back();
-        }
-
+        $method = WithdrawalMethod::find($request['withdraw_method']);
         $fields = array_column($method->method_fields, 'input_name');
+        $values = $request->all();
+
         $method_data = [];
         foreach ($fields as $field) {
-            if ($request->has($field)) {
-                $method_data[$field] = $request->input($field);
+            if (key_exists($field, $values)) {
+                $method_data[$field] = $values[$field];
             }
         }
 
-        \Log::info('9PSB VENDOR | STEP 2 - METHOD AND DATA', [
-            'method_id' => $method->id,
-            'method_name' => $method->method_name,
+        \Log::info('VENDOR WITHDRAW STEP 3 - METHOD DATA CAPTURED', [
             'method_data' => $method_data,
+            'account_number' => $method_data['account_number'] ?? 'NOT FOUND',
         ]);
 
-        // =========================================================================
-        // Step 3 — Resolve bank code from hardcoded map
-        // =========================================================================
-        $method_name = strtolower(trim($method->method_name ?? ''));
-        $bank_code_from_form = $method_data['bank_code'] ?? $request->bank_code ?? null;
-
-        $bankCodeMap = [
-            'opay' => '100004',
-            'palmpay' => '100033',
-            'airpero' => '090133',
-            'bank transfer' => $bank_code_from_form ?? '100004',
-        ];
-
-        $bank_code = '100004'; // fallback
-        foreach ($bankCodeMap as $keyword => $code) {
-            if (str_contains($method_name, $keyword)) {
-                $bank_code = $code;
-                break;
-            }
-        }
-
-        $account_number = $method_data['account_number'] ?? $request->account_number ?? null;
-
-        \Log::info('9PSB VENDOR | STEP 3 - BANK CODE RESOLVED', [
-            'method_name' => $method_name,
-            'bank_code' => $bank_code,
-            'account_number' => $account_number,
-        ]);
-
-        // =========================================================================
-        // Step 4 — Balance check
-        // =========================================================================
         $w = StoreWallet::where('vendor_id', Helpers::get_vendor_id())->first();
 
-        if (!$w) {
-            \Log::error('9PSB VENDOR | STEP 4 FAILED - Wallet not found', [
-                'vendor_id' => Helpers::get_vendor_id(),
-            ]);
-            Toastr::error('Wallet not found.');
-            return redirect()->back();
-        }
-
-        \Log::info('9PSB VENDOR | STEP 4 - WALLET CHECK', [
-            'wallet_balance' => $w->balance,
-            'requested_amount' => $request->amount,
-            'has_enough' => $w->balance >= $request->amount ? 'YES' : 'NO',
+        \Log::info('VENDOR WITHDRAW STEP 4 - WALLET CHECK', [
+            'wallet_balance' => $w?->balance ?? 'NULL',
+            'requested_amount' => $request['amount'],
+            'has_enough' => ((string) $w?->balance >= (string) $request['amount']) ? 'YES' : 'NO',
         ]);
 
-        if ($w->balance < $request->amount) {
-            \Log::warning('9PSB VENDOR | STEP 4 FAILED - Insufficient balance', [
-                'wallet_balance' => $w->balance,
-                'requested_amount' => $request->amount,
-            ]);
-            Toastr::error('Insufficient balance.');
-            return redirect()->back();
-        }
+        if ((string) $w->balance >= (string) $request['amount'] && (string) $request['amount'] > .01) {
+            try {
+                // ---------------------------------------------------------------
+                // IDEMPOTENCY LOCK
+                // ---------------------------------------------------------------
+                $withdraw = DB::transaction(function () use ($w, $request, $method_data) {
 
-        // =========================================================================
-        // Step 5 — Save withdraw request inside lock
-        // =========================================================================
-        try {
-            $withdraw = DB::transaction(function () use ($w, $request, $method_data) {
+                    // Lock this vendor's wallet row for the duration of the transaction
+                    $wallet = StoreWallet::where('vendor_id', $w->vendor_id)
+                        ->lockForUpdate()
+                        ->first();
 
-                $wallet = StoreWallet::where('vendor_id', $w->vendor_id)
-                    ->lockForUpdate()
-                    ->first();
+                    // Check for a pending withdraw created in last 2 minutes
+                    $existing = WithdrawRequest::where('vendor_id', $wallet->vendor_id)
+                        ->where('amount', $request['amount'])
+                        ->where('approved', 0)
+                        ->where('created_at', '>=', now()->subMinutes(2))
+                        ->first();
 
-                // Idempotency — reuse pending request created in last 2 mins
-                $existing = WithdrawRequest::where('vendor_id', $wallet->vendor_id)
-                    ->where('amount', $request->amount)
-                    ->where('approved', 0)
-                    ->where('created_at', '>=', now()->subMinutes(2))
-                    ->first();
+                    if ($existing) {
+                        \Log::warning('VENDOR IDEMPOTENCY - Reusing existing withdraw request', [
+                            'withdraw_id' => $existing->id,
+                        ]);
+                        return $existing;
+                    }
 
-                if ($existing) {
-                    \Log::warning('9PSB VENDOR | STEP 5 - IDEMPOTENCY reusing existing request', [
-                        'withdraw_id' => $existing->id,
-                    ]);
-                    return $existing;
-                }
+                    // Fresh insert — safe because wallet row is locked
+                    $data = [
+                        'vendor_id' => $wallet->vendor_id,
+                        'amount' => $request['amount'],
+                        'transaction_note' => null,
+                        'withdrawal_method_id' => $request['withdraw_method'],
+                        'withdrawal_method_fields' => json_encode($method_data),
+                        'approved' => 0,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ];
+                    DB::table('withdraw_requests')->insert($data);
+                    
+                    $wallet->increment('pending_withdraw', $request['amount']);
 
-                // Re-check balance inside lock
-                if ($wallet->balance < $request->amount) {
-                    throw new \Exception('insufficient_balance');
-                }
+                    return WithdrawRequest::where('vendor_id', $wallet->vendor_id)
+                        ->latest()
+                        ->first();
+                });
 
-                DB::table('withdraw_requests')->insert([
-                    'vendor_id' => $wallet->vendor_id,
-                    'amount' => $request->amount,
-                    'transaction_note' => null,
-                    'withdrawal_method_id' => $request->withdraw_method,
-                    'withdrawal_method_fields' => json_encode($method_data),
-                    'approved' => 0,  // pending until payout confirmed
-                    'created_at' => now(),
-                    'updated_at' => now(),
+                \Log::info('VENDOR WITHDRAW STEP 5 - WITHDRAW SAVED', [
+                    'withdraw_id' => $withdraw->id,
+                    'amount' => $withdraw->amount,
+                    'approved' => $withdraw->approved,
                 ]);
 
-                return WithdrawRequest::where('vendor_id', $wallet->vendor_id)
-                    ->latest()
-                    ->first();
-            });
+                // 9PSB AUTO-PAYOUT
+                $account_number = $method_data['account_number'] ?? null;
+                $method_name = strtolower(trim($method->method_name ?? ''));
+                $bank_code_from_form = $method_data['bank_code'] ?? null;
 
-            \Log::info('9PSB VENDOR | STEP 5 - WITHDRAW SAVED', [
-                'withdraw_id' => $withdraw->id,
-                'amount' => $withdraw->amount,
-                'approved' => $withdraw->approved,
-            ]);
+                $bankCodeMap = [
+                    'opay' => '100004',
+                    'palmpay' => '100033',
+                    'airpero' => '090133',
+                    'bank transfer' => $bank_code_from_form ?? '100004',
+                ];
 
-        } catch (\Exception $e) {
-            if ($e->getMessage() === 'insufficient_balance') {
-                Toastr::error('Insufficient balance.');
+                $bank_code = $bankCodeMap[$method_name] ?? '100004';
+
+                \Log::info('VENDOR WITHDRAW STEP 6 - BANK CODE LOOKUP', [
+                    'method_name' => $method_name,
+                    'bank_code' => $bank_code ?? 'NOT MAPPED',
+                    'account_number' => $account_number ?? 'NULL',
+                ]);
+
+                if ($account_number && $bank_code) {
+                    try {
+                        $ninePsb = new \App\Http\Controllers\Api\V1\NinePsbPaymentController();
+
+                        // STEP 7 — Get bank list
+                        $banksRaw = json_decode($ninePsb->getBanks()->getContent(), true);
+
+                        \Log::info('VENDOR WITHDRAW STEP 7 - GET BANKS RESPONSE', [
+                            'success' => $banksRaw['success'] ?? 'NULL',
+                            'data_keys' => array_keys($banksRaw['data'] ?? []),
+                        ]);
+
+                        $bankList = $banksRaw['data']['data']['bankList']
+                            ?? $banksRaw['data']['bankList']
+                            ?? $banksRaw['data']['data']['data']['bankList']
+                            ?? [];
+
+                        \Log::info('VENDOR WITHDRAW STEP 7B - BANK LIST COUNT', [
+                            'count' => count($bankList),
+                        ]);
+
+                        $matchedBank = collect($bankList)->firstWhere('bankCode', $bank_code);
+
+                        \Log::info('VENDOR WITHDRAW STEP 7C - BANK MATCH', [
+                            'bank_code' => $bank_code,
+                            'matched_bank' => $matchedBank ?? 'NOT FOUND',
+                        ]);
+
+                        if (!$matchedBank) {
+                            \Log::error('VENDOR WITHDRAW STEP 7 FAILED - Bank code not found', [
+                                'bank_code' => $bank_code,
+                                'method_name' => $method_name,
+                            ]);
+                            goto send_notification;
+                        }
+
+                        $bank_name = $matchedBank['bankName'];
+
+                        // STEP 8 — Name enquiry
+                        $enquiryResult = $ninePsb->nameEnquiryDirect($account_number, $bank_code);
+
+                        \Log::info('VENDOR WITHDRAW STEP 8 - NAME ENQUIRY RESPONSE', $enquiryResult ?? []);
+
+                        if (!$enquiryResult['success']) {
+                            \Log::error('VENDOR WITHDRAW STEP 8 FAILED - Account name not found', [
+                                'raw' => $enquiryResult,
+                            ]);
+                            goto send_notification;
+                        }
+
+                        $account_name = $enquiryResult['accountName'];
+
+                        \Log::info('VENDOR WITHDRAW STEP 8 SUCCESS - Account name resolved', [
+                            'account_name' => $account_name,
+                            'bank_name' => $bank_name,
+                        ]);
+
+                        // STEP 9 — Fire payout
+                        // Re-fetch fresh from DB to guard against approved by another request
+                        $freshWithdraw = WithdrawRequest::find($withdraw->id);
+
+                        if ($freshWithdraw->approved == 1) {
+                            \Log::warning('VENDOR WITHDRAW STEP 9 SKIPPED - Already approved, duplicate payout prevented', [
+                                'withdraw_id' => $withdraw->id,
+                            ]);
+                            goto send_notification;
+                        }
+
+                        // Lock the withdraw row before paying to prevent race on payout
+                        DB::transaction(function () use ($freshWithdraw, $ninePsb, $account_number, $bank_code, $account_name, $bank_name, $w, &$withdraw) {
+                            $locked = WithdrawRequest::where('id', $freshWithdraw->id)
+                                ->where('approved', 0)
+                                ->lockForUpdate()
+                                ->first();
+
+                            // Another process already approved it while we were waiting
+                            if (!$locked) {
+                                \Log::warning('VENDOR WITHDRAW STEP 9 SKIPPED INSIDE LOCK - Already approved', [
+                                    'withdraw_id' => $freshWithdraw->id,
+                                ]);
+                                return;
+                            }
+
+                            $payoutResult = $ninePsb->payoutStoreToBankDirect(
+                                (float) $locked->amount,
+                                $account_number,
+                                $bank_code,
+                                $account_name,
+                                'Vendor Fast Withdraw ID: ' . $locked->id
+                            );
+
+                            \Log::info('VENDOR WITHDRAW STEP 9 - PAYOUT RESPONSE', $payoutResult ?? []);
+
+                            if (!$payoutResult['success']) {
+                                \Log::error('VENDOR WITHDRAW STEP 9 FAILED - Payout failed', [
+                                    'message' => $payoutResult['message'] ?? 'Unknown',
+                                ]);
+                                return; // exits transaction, goto send_notification below
+                            }
+
+                            // STEP 10 — Auto approve inside the lock
+                            $locked->approved = 1;
+                            $locked->transaction_note = 'Auto-paid via 9PSB to '
+                                . $account_name
+                                . ' (' . $bank_name . ') on '
+                                . now()->toDateTimeString();
+                            $locked->save();
+
+                            $w->increment('total_withdrawn', $locked->amount);
+                            $w->decrement('pending_withdraw', $locked->amount);
+
+                            \Log::info('VENDOR WITHDRAW STEP 10 SUCCESS - AUTO APPROVED', [
+                                'withdraw_id' => $locked->id,
+                                'account_name' => $account_name,
+                                'bank_name' => $bank_name,
+                                'amount' => $locked->amount,
+                            ]);
+
+                            $withdraw = $locked;
+                        });
+
+                    } catch (\Exception $e) {
+                        \Log::error('VENDOR 9PSB EXCEPTION', [
+                            'withdraw_id' => $withdraw->id,
+                            'error' => $e->getMessage(),
+                            'line' => $e->getLine(),
+                            'file' => $e->getFile(),
+                        ]);
+                    }
+                } else {
+                    \Log::warning('VENDOR WITHDRAW STEP 6 SKIPPED - No account number or bank code', [
+                        'account_number' => $account_number ?? 'NULL',
+                        'bank_code' => $bank_code ?? 'NULL',
+                        'method_name' => $method_name,
+                    ]);
+                }
+
+                send_notification:
+
+                try {
+                    $admin = Admin::where('role_id', 1)->first();
+                    $wallet_transaction = $withdraw; // WithdrawRequestMail needs the model
+                    if (Helpers::get_store_data()?->module?->module_type !== 'rental' && config('mail.status') && Helpers::get_mail_status('withdraw_request_mail_status_admin') == '1' && Helpers::getNotificationStatusData('admin', 'withdraw_request', 'mail_status')) {
+                        Mail::to($admin['email'])->send(new WithdrawRequestMail('pending', $wallet_transaction));
+                    } elseif (Helpers::get_store_data()?->module?->module_type == 'rental' && addon_published_status('Rental') && config('mail.status') && Helpers::get_mail_status('rental_withdraw_request_mail_status_admin') == '1' && Helpers::getRentalNotificationStatusData('admin', 'provider_withdraw_request', 'mail_status')) {
+                        Mail::to($admin['email'])->send(new ProviderWithdrawRequestMail('pending', $wallet_transaction));
+                    }
+                } catch (\Exception $e) {
+                    info($e->getMessage());
+                }
+
+                Toastr::success('Withdraw request has been sent.');
+                return redirect()->back();
+
+            } catch (\Exception $e) {
+                \Log::error('VENDOR WITHDRAW REQUEST EXCEPTION', [
+                    'error' => $e->getMessage(),
+                    'line' => $e->getLine(),
+                    'file' => $e->getFile(),
+                ]);
+                info($e->getMessage());
+                Toastr::error('Withdraw request failed due to an error.');
                 return redirect()->back();
             }
-
-            \Log::error('9PSB VENDOR | STEP 5 FAILED - DB error', [
-                'error' => $e->getMessage(),
-                'line' => $e->getLine(),
-                'file' => $e->getFile(),
-            ]);
-            Toastr::error('Could not save withdrawal request. Please try again.');
-            return redirect()->back();
         }
 
-        // =========================================================================
-        // Step 6 — 9PSB auto-payout (enquiry → payout → approve)
-        // =========================================================================
-        if (!$account_number || !$bank_code) {
-            \Log::warning('9PSB VENDOR | STEP 6 SKIPPED - Missing account number or bank code', [
-                'account_number' => $account_number ?? 'NULL',
-                'bank_code' => $bank_code ?? 'NULL',
-            ]);
-            goto send_notification;
-        }
-
-        try {
-            $ninePsb = new \App\Http\Controllers\Api\V1\NinePsbPaymentController();
-
-            // -----------------------------------------------------------------
-            // Step 7 — Get bank list and match bank code
-            // -----------------------------------------------------------------
-            $banksRaw = json_decode($ninePsb->getBanks()->getContent(), true);
-
-            \Log::info('9PSB VENDOR | STEP 7 - GET BANKS RESPONSE', [
-                'success' => $banksRaw['success'] ?? 'NULL',
-                'data_keys' => array_keys($banksRaw['data'] ?? []),
-            ]);
-
-            $bankList = $banksRaw['data']['data']['bankList']
-                ?? $banksRaw['data']['bankList']
-                ?? $banksRaw['data']['data']['data']['bankList']
-                ?? [];
-
-            \Log::info('9PSB VENDOR | STEP 7B - BANK LIST COUNT', [
-                'count' => count($bankList),
-            ]);
-
-            $matchedBank = collect($bankList)->firstWhere('bankCode', $bank_code);
-
-            \Log::info('9PSB VENDOR | STEP 7C - BANK MATCH', [
-                'bank_code' => $bank_code,
-                'matched_bank' => $matchedBank ?? 'NOT FOUND',
-            ]);
-
-            if (!$matchedBank) {
-                \Log::error('9PSB VENDOR | STEP 7 FAILED - Bank code not in list', [
-                    'bank_code' => $bank_code,
-                    'method_name' => $method_name,
-                ]);
-                goto send_notification;
-            }
-
-            $bank_name = $matchedBank['bankName'];
-
-            // -----------------------------------------------------------------
-            // Step 8 — Name enquiry
-            // -----------------------------------------------------------------
-            $enquiryRequest = new \Illuminate\Http\Request();
-            $enquiryRequest->replace([
-                'accountNumber' => $account_number,
-                'bankCode' => $bank_code,
-            ]);
-
-            $enquiryResponse = json_decode(
-                $ninePsb->nameEnquiry($enquiryRequest)->getContent(),
-                true
-            );
-
-            \Log::info('9PSB VENDOR | STEP 8 - NAME ENQUIRY RESPONSE', $enquiryResponse ?? []);
-
-            $account_name = $enquiryResponse['data']['customer']['account']['name']
-                ?? $enquiryResponse['raw']['data']['customer']['account']['name']
-                ?? $enquiryResponse['data']['accountName']
-                ?? $enquiryResponse['data']['account_name']
-                ?? null;
-
-            if (!$account_name) {
-                \Log::error('9PSB VENDOR | STEP 8 FAILED - Account name not resolved', [
-                    'raw' => $enquiryResponse,
-                ]);
-                goto send_notification;
-            }
-
-            \Log::info('9PSB VENDOR | STEP 8 SUCCESS - Account name resolved', [
-                'account_name' => $account_name,
-                'bank_name' => $bank_name,
-            ]);
-
-            // -----------------------------------------------------------------
-            // Step 9 — Fire payout (with duplicate guard)
-            // -----------------------------------------------------------------
-            $freshWithdraw = WithdrawRequest::find($withdraw->id);
-
-            if ($freshWithdraw->approved == 1) {
-                \Log::warning('9PSB VENDOR | STEP 9 SKIPPED - Already approved, duplicate payout prevented', [
-                    'withdraw_id' => $withdraw->id,
-                ]);
-                goto send_notification;
-            }
-
-            // Step 9 — Fire payout (with duplicate guard)
-            DB::transaction(function () use ($freshWithdraw, $ninePsb, $account_number, $bank_code, $account_name, $bank_name, $w, &$withdraw) {
-
-                $locked = WithdrawRequest::where('id', $freshWithdraw->id)
-                    ->where('approved', 0)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (!$locked) {
-                    \Log::warning('9PSB VENDOR | STEP 9 SKIPPED INSIDE LOCK - Already approved by another process', [
-                        'withdraw_id' => $freshWithdraw->id,
-                    ]);
-                    return;
-                }
-
-                $payoutRequest = new \Illuminate\Http\Request();
-                $payoutRequest->replace([
-                    'amount' => $locked->amount,
-                    'accountNumber' => $account_number,
-                    'bankCode' => $bank_code,
-                    'accountName' => $account_name,
-                    'narration' => 'Vendor Withdraw ID: ' . $locked->id,  // satisfies required|string
-                ]);
-
-                $payoutResponse = $ninePsb->payoutStoreToBank($payoutRequest);
-
-                \Log::info('9PSB VENDOR | STEP 9 - PAYOUT RESPONSE', $payoutResponse ?? []);
-
-                if (!isset($payoutResponse['success']) || $payoutResponse['success'] !== true) {
-                    \Log::error('9PSB VENDOR | STEP 9 FAILED - Payout unsuccessful', [
-                        'message' => $payoutResponse['message'] ?? 'Unknown',
-                        'raw' => $payoutResponse,
-                    ]);
-                    return;
-                }
-
-                // Step 10 — Auto-approve + deduct balance
-                $locked->approved = 1;
-                $locked->transaction_note = 'Auto-paid via 9PSB to '
-                    . $account_name
-                    . ' (' . $bank_name . ') on '
-                    . now()->toDateTimeString();
-                $locked->save();
-
-                $w->decrement('balance', $locked->amount);
-
-                \Log::info('9PSB VENDOR | STEP 10 SUCCESS - AUTO APPROVED + BALANCE DEDUCTED', [
-                    'withdraw_id' => $locked->id,
-                    'account_name' => $account_name,
-                    'bank_name' => $bank_name,
-                    'amount' => $locked->amount,
-                ]);
-
-                $withdraw = $locked;
-            });
-
-        } catch (\Exception $e) {
-            \Log::error('9PSB VENDOR | 9PSB EXCEPTION', [
-                'withdraw_id' => $withdraw->id ?? 'NULL',
-                'error' => $e->getMessage(),
-                'line' => $e->getLine(),
-                'file' => $e->getFile(),
-            ]);
-        }
-
-        // =========================================================================
-        // Step 11 — Send notification email
-        // =========================================================================
-        send_notification:
-
-        \Log::info('9PSB VENDOR | STEP 11 - SENDING NOTIFICATION EMAIL', [
-            'vendor_id' => Helpers::get_vendor_id(),
-            'withdraw_id' => $withdraw->id ?? 'NULL',
-        ]);
-
-        try {
-            $admin = Admin::where('role_id', 1)->first();
-
-            $wallet_transaction = WithdrawRequest::where('vendor_id', Helpers::get_vendor_id())
-                ->latest()
-                ->first();
-
-            if (
-                Helpers::get_store_data()?->module?->module_type !== 'rental' &&
-                config('mail.status') &&
-                Helpers::get_mail_status('withdraw_request_mail_status_admin') == '1' &&
-                Helpers::getNotificationStatusData('admin', 'withdraw_request', 'mail_status')
-            ) {
-                Mail::to($admin->email)->send(new WithdrawRequestMail('admin_mail', $wallet_transaction));
-                \Log::info('9PSB VENDOR | STEP 11 - Admin withdraw mail sent', [
-                    'admin_email' => $admin->email,
-                ]);
-
-            } elseif (
-                Helpers::get_store_data()?->module?->module_type == 'rental' &&
-                addon_published_status('Rental') &&
-                config('mail.status') &&
-                Helpers::get_mail_status('rental_withdraw_request_mail_status_admin') == '1' &&
-                Helpers::getRentalNotificationStatusData('admin', 'provider_withdraw_request', 'mail_status')
-            ) {
-                Mail::to($admin->email)->send(new ProviderWithdrawRequestMail('pending', $wallet_transaction));
-                \Log::info('9PSB VENDOR | STEP 11 - Rental provider withdraw mail sent', [
-                    'admin_email' => $admin->email,
-                ]);
-            } else {
-                \Log::info('9PSB VENDOR | STEP 11 - Email skipped (conditions not met)', [
-                    'mail_status' => config('mail.status'),
-                ]);
-            }
-
-        } catch (\Exception $e) {
-            \Log::error('9PSB VENDOR | STEP 11 FAILED - Mail error', [
-                'error' => $e->getMessage(),
-            ]);
-        }
-
-        \Log::info('9PSB VENDOR | COMPLETED', [
-            'vendor_id' => Helpers::get_vendor_id(),
-            'withdraw_id' => $withdraw->id ?? 'NULL',
-            'approved' => $withdraw->approved ?? 'NULL',
-            'amount' => $withdraw->amount ?? 'NULL',
-        ]);
-
-        Toastr::success('Withdrawal processed successfully.');
+        Toastr::error('invalid request.!');
         return redirect()->back();
     }
-
     public function close_request($id)
     {
         $wr = WithdrawRequest::find($id);

@@ -28,7 +28,6 @@ class NinePsbPaymentController extends Controller
         $this->privateKey = config('services.ninepsb.private_key');
     }
 
-
     // -------------------------------------------------------------------------
     // Create Virtual Account
     // -------------------------------------------------------------------------
@@ -82,7 +81,7 @@ class NinePsbPaymentController extends Controller
             return $this->errorResponse('Failed to initiate transaction: ' . $e->getMessage(), 500);
         }
     }
-    // https://sandbox.v1.airpero.com/api/v1/merchants/customers
+
     // -------------------------------------------------------------------------
     // Webhook — handles both PAYIN_SUCCESS and WALLET_FUNDED
     // -------------------------------------------------------------------------
@@ -103,10 +102,12 @@ class NinePsbPaymentController extends Controller
         return response()->json(['status' => 'ok'], 200);
     }
 
-    private function triggerVirtualAccountDebit(Order $order, $user): void
+    // -------------------------------------------------------------------------
+    // Trigger Virtual Account Debit (internal use)
+    // -------------------------------------------------------------------------
+    private function triggerVirtualAccountDebit($order, $user): void
     {
         try {
-            // Get virtual_user_id from the authenticated user
             $customerId = $user?->virtual_user_id;
 
             if (!$customerId) {
@@ -119,7 +120,6 @@ class NinePsbPaymentController extends Controller
 
             $amount = $order->order_amount;
 
-            // If partially paid, only debit the wallet portion
             if ($order->payment_status === 'partially_paid') {
                 $amount = $order->partially_paid_amount;
             }
@@ -155,7 +155,6 @@ class NinePsbPaymentController extends Controller
             }
 
         } catch (\Exception $e) {
-            // Don't crash the order — just log the failure
             Log::error('9PSB debit exception', [
                 'order_id' => $order->id,
                 'error' => $e->getMessage(),
@@ -187,7 +186,6 @@ class NinePsbPaymentController extends Controller
                 'reason' => $validated['reason'],
             ]);
 
-        // Log everything
         Log::info('9PSB debitVirtualAccountUser raw response', [
             'status' => $response->status(),
             'headers' => $response->headers(),
@@ -283,7 +281,6 @@ class NinePsbPaymentController extends Controller
         $senderAccount = $data['senderAccountNumber'] ?? null;
         $senderBank = $data['senderBankName'] ?? null;
 
-        // 1. Prevent duplicate
         if (WalletTransaction::where('transaction_id', $transactionId)->exists()) {
             Log::info('9PSB WALLET_FUNDED: duplicate ignored', [
                 'transactionId' => $transactionId,
@@ -292,7 +289,6 @@ class NinePsbPaymentController extends Controller
             return;
         }
 
-        // 2. Find merchant/admin — adjust to match your admin identification
         $merchant = User::where('is_admin', true)->first();
 
         if (!$merchant) {
@@ -301,13 +297,9 @@ class NinePsbPaymentController extends Controller
         }
 
         DB::transaction(function () use ($merchant, $amount, $transactionId, $reference) {
-            // 3. Credit merchant wallet
             $merchant->increment('wallet_balance', $amount);
-
-            // 4. Get fresh balance
             $newBalance = $merchant->fresh()->wallet_balance;
 
-            // 5. Record transaction
             WalletTransaction::create([
                 'user_id' => $merchant->id,
                 'transaction_id' => $transactionId,
@@ -320,7 +312,6 @@ class NinePsbPaymentController extends Controller
             ]);
         });
 
-        // 6. Notify merchant via FCM
         if ($merchant->device_token) {
             WalletCredited::sendPush(
                 $merchant->device_token,
@@ -339,9 +330,9 @@ class NinePsbPaymentController extends Controller
             'sender_account' => $senderAccount,
         ]);
     }
+
     // -------------------------------------------------------------------------
     // Debit a customer's 9PSB virtual wallet
-    // Moves funds FROM customer TO merchant wallet
     // -------------------------------------------------------------------------
     public function debitCustomer(User $user, float $amount, string $reason): bool
     {
@@ -391,7 +382,6 @@ class NinePsbPaymentController extends Controller
 
     // -------------------------------------------------------------------------
     // Credit a customer's 9PSB virtual wallet
-    // Moves funds FROM merchant wallet TO customer
     // -------------------------------------------------------------------------
     public function creditCustomer(User $user, float $amount, string $narration): bool
     {
@@ -438,11 +428,10 @@ class NinePsbPaymentController extends Controller
 
         return true;
     }
-    // -------------------------------------------------------------------------
-    // Vendor/Store Payout — real-time bank transfer via 9PSB
-    // POST /api/v1/merchants/payout - (9pSb endpoint)
-    // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // Vendor/Store Payout — via HTTP route (keeps original for API use)
+    // -------------------------------------------------------------------------
     public function payoutStoreToBank(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -451,6 +440,40 @@ class NinePsbPaymentController extends Controller
             'bankCode' => 'required|string',
             'accountName' => 'required|string|max:255',
             'narration' => 'required|string|max:255',
+        ]);
+
+        $result = $this->payoutStoreToBankDirect(
+            amount: (float) $validated['amount'],
+            accountNumber: $validated['accountNumber'],
+            bankCode: $validated['bankCode'],
+            accountName: $validated['accountName'],
+            narration: $validated['narration'],
+        );
+
+        if ($result['success']) {
+            return response()->json($result, 200);
+        }
+
+        return response()->json($result, 500);
+    }
+
+    // -------------------------------------------------------------------------
+    // Vendor/Store Payout — called internally without a Request object
+    // FIX: This avoids ValidationException when called manually from w_request
+    // -------------------------------------------------------------------------
+    public function payoutStoreToBankDirect(
+        float $amount,
+        string $accountNumber,
+        string $bankCode,
+        string $accountName,
+        string $narration
+    ): array {
+        Log::info('9PSB payoutStoreToBankDirect | CALLED', [
+            'amount' => $amount,
+            'accountNumber' => $accountNumber,
+            'bankCode' => $bankCode,
+            'accountName' => $accountName,
+            'narration' => $narration,
         ]);
 
         try {
@@ -464,45 +487,54 @@ class NinePsbPaymentController extends Controller
                 ->timeout(30)
                 ->retry(2, sleepMilliseconds: 500, throw: false)
                 ->post('/api/v1/merchants/payout', [
-                    'amount' => $validated['amount'],
-                    'accountNumber' => $validated['accountNumber'],
-                    'bankCode' => $validated['bankCode'],
-                    'accountName' => $validated['accountName'],
-                    'narration' => $validated['narration'],
+                    'amount' => $amount,
+                    'accountNumber' => $accountNumber,
+                    'bankCode' => $bankCode,
+                    'accountName' => $accountName,
+                    'narration' => $narration,
                 ]);
 
-            Log::info('9PSB payoutToBank response', [
+            Log::info('9PSB payoutStoreToBankDirect | RESPONSE', [
                 'status' => $response->status(),
                 'body' => $response->json() ?? $response->body(),
-                'payload' => $validated,
             ]);
 
             if ($response->successful()) {
-                return response()->json([
+                return [
                     'success' => true,
                     'message' => 'Payout initiated successfully',
                     'data' => $response->json(),
-                ], $response->status());
+                ];
             }
 
-            return response()->json([
+            Log::error('9PSB payoutStoreToBankDirect | FAILED', [
+                'status' => $response->status(),
+                'message' => $response->json('message') ?? 'Payout request failed',
+                'errors' => $response->json('errors') ?? [],
+            ]);
+
+            return [
                 'success' => false,
                 'message' => $response->json('message') ?? 'Payout request failed',
                 'errors' => $response->json('errors') ?? [],
-            ], $response->status() ?: 500);
+            ];
 
         } catch (\Exception $e) {
-            Log::error('9PSB payoutToBank exception', [
+            Log::error('9PSB payoutStoreToBankDirect | EXCEPTION', [
                 'error' => $e->getMessage(),
-                'payload' => $validated,
+                'line' => $e->getLine(),
+                'file' => $e->getFile(),
             ]);
 
-            return $this->errorResponse('Payout failed: ' . $e->getMessage(), 500);
+            return [
+                'success' => false,
+                'message' => 'Payout failed: ' . $e->getMessage(),
+            ];
         }
     }
+
     // -------------------------------------------------------------------------
-    // Deliveryman Payout — real-time bank transfer via 9PSB
-    // POST /api/v1/merchants/payout - (9pSb endpoint)
+    // Deliveryman Payout — via HTTP route
     // -------------------------------------------------------------------------
     public function payoutDeliveryManToBank(Request $request): JsonResponse
     {
@@ -532,7 +564,7 @@ class NinePsbPaymentController extends Controller
                     'narration' => $validated['narration'],
                 ]);
 
-            Log::info('9PSB payoutToBank response', [
+            Log::info('9PSB payoutDeliveryManToBank response', [
                 'status' => $response->status(),
                 'body' => $response->json() ?? $response->body(),
                 'payload' => $validated,
@@ -553,7 +585,7 @@ class NinePsbPaymentController extends Controller
             ], $response->status() ?: 500);
 
         } catch (\Exception $e) {
-            Log::error('9PSB payoutToBank exception', [
+            Log::error('9PSB payoutDeliveryManToBank exception', [
                 'error' => $e->getMessage(),
                 'payload' => $validated,
             ]);
@@ -563,8 +595,7 @@ class NinePsbPaymentController extends Controller
     }
 
     // -------------------------------------------------------------------------
-    // Get Banks List — all Nigerian banks and their codes
-    // GET /api/v1/banks
+    // Get Banks List
     // -------------------------------------------------------------------------
     public function getBanks(): JsonResponse
     {
@@ -581,6 +612,7 @@ class NinePsbPaymentController extends Controller
 
             Log::info('9PSB getBanks response', [
                 'status' => $response->status(),
+                'body' => $response->json() ?? $response->body(),
             ]);
 
             if ($response->successful()) {
@@ -604,11 +636,48 @@ class NinePsbPaymentController extends Controller
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Name Enquiry — via HTTP route (keeps original for API use)
+    // -------------------------------------------------------------------------
     public function nameEnquiry(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'accountNumber' => 'required|string',
             'bankCode' => 'required|string',
+        ]);
+
+        $result = $this->nameEnquiryDirect(
+            accountNumber: $validated['accountNumber'],
+            bankCode: $validated['bankCode'],
+        );
+
+        if ($result['success']) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Account name resolved successfully',
+                'data' => [
+                    'accountName' => $result['accountName'],
+                    'accountNumber' => $validated['accountNumber'],
+                    'bankCode' => $validated['bankCode'],
+                ],
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => $result['message'] ?? 'Name enquiry failed',
+        ], 422);
+    }
+
+    // -------------------------------------------------------------------------
+    // Name Enquiry — called internally without a Request object
+    // FIX: This avoids ValidationException when called manually from w_request
+    // -------------------------------------------------------------------------
+    public function nameEnquiryDirect(string $accountNumber, string $bankCode): array
+    {
+        Log::info('9PSB nameEnquiryDirect | CALLED', [
+            'accountNumber' => $accountNumber,
+            'bankCode' => $bankCode,
         ]);
 
         try {
@@ -622,60 +691,69 @@ class NinePsbPaymentController extends Controller
                 ->timeout(15)
                 ->retry(2, sleepMilliseconds: 500, throw: false)
                 ->post('/api/v1/banks/enquiry', [
-                    'accountNumber' => $validated['accountNumber'],
-                    'bankCode' => $validated['bankCode'],
+                    'accountNumber' => $accountNumber,
+                    'bankCode' => $bankCode,
                 ]);
 
-            Log::info('9PSB nameEnquiry response', [
+            Log::info('9PSB nameEnquiryDirect | RESPONSE', [
                 'status' => $response->status(),
                 'body' => $response->json() ?? $response->body(),
-                'accountNumber' => $validated['accountNumber'],
-                'bankCode' => $validated['bankCode'],
+                'accountNumber' => $accountNumber,
+                'bankCode' => $bankCode,
             ]);
 
             if ($response->successful()) {
                 $body = $response->json();
-                $account_name = $body['data']['accountName'] ?? null;
+                $account_name = $body['data']['customer']['account']['name']
+                    ?? $body['data']['accountName']
+                    ?? $body['data']['account_name']
+                    ?? null;
 
                 if (!$account_name) {
-                    return response()->json([
+                    Log::error('9PSB nameEnquiryDirect | ACCOUNT NAME MISSING', [
+                        'raw' => $body,
+                    ]);
+                    return [
                         'success' => false,
                         'message' => 'Account name not found in 9PSB response',
                         'raw' => $body,
-                    ], 422);
+                    ];
                 }
 
-                return response()->json([
+                return [
                     'success' => true,
-                    'message' => 'Account name resolved successfully',
-                    'data' => [
-                        'accountName' => $account_name,
-                        'accountNumber' => $validated['accountNumber'],
-                        'bankCode' => $validated['bankCode'],
-                    ],
-                ]);
+                    'accountName' => $account_name,
+                ];
             }
 
-            return response()->json([
-                'success' => false,
+            Log::error('9PSB nameEnquiryDirect | HTTP FAILED', [
+                'status' => $response->status(),
                 'message' => $response->json('message') ?? 'Name enquiry failed',
-                'errors' => $response->json('errors') ?? [],
-            ], $response->status() ?: 500);
-
-        } catch (\Exception $e) {
-            Log::error('9PSB nameEnquiry exception', [
-                'error' => $e->getMessage(),
-                'accountNumber' => $validated['accountNumber'] ?? null,
-                'bankCode' => $validated['bankCode'] ?? null,
             ]);
 
-            return $this->errorResponse('Name enquiry failed: ' . $e->getMessage(), 500);
+            return [
+                'success' => false,
+                'message' => $response->json('message') ?? 'Name enquiry failed',
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('9PSB nameEnquiryDirect | EXCEPTION', [
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile(),
+                'accountNumber' => $accountNumber,
+                'bankCode' => $bankCode,
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Name enquiry failed: ' . $e->getMessage(),
+            ];
         }
     }
 
     // -------------------------------------------------------------------------
-    // Record the wallet movement in WalletTransaction table
-    // Call this AFTER a successful 9PSB API debit/credit to keep local DB in sync
+    // Record wallet movement in WalletTransaction table
     // -------------------------------------------------------------------------
     public function recordTransaction(
         User $user,
@@ -685,7 +763,6 @@ class NinePsbPaymentController extends Controller
         string $reference,
     ): void {
         DB::transaction(function () use ($user, $credit, $debit, $transactionType, $reference) {
-            // Sync local wallet_balance
             $user->wallet_balance += ($credit - $debit);
             $user->save();
 
