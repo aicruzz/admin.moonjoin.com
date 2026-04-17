@@ -9,7 +9,7 @@ use Illuminate\Console\Scheduling\Schedule;
 class StoreDisbursementScheduler extends Command
 {
     protected $signature = 'store:disbursement';
-    protected $description = 'Store disbursement scheduling based on business settings';
+    protected $descriptbion = 'Store disbursement scheduling based on business settings';
 
     public function __construct()
     {

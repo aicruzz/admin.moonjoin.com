@@ -543,6 +543,12 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
             Route::put('order-cancel-reasons/update', 'OrderCancelReasonController@update')->name('order-cancel-reasons.update');
             Route::delete('order-cancel-reasons/destroy/{id}', 'OrderCancelReasonController@destroy')->name('order-cancel-reasons.destroy');
 
+            // Debit Deliveryman Reasons — separate table, separate controller
+            Route::get('debit-deliveryman-reasons/status/{id}/{status}', 'DebitDeliverymanReasonController@status')->name('debit-deliveryman-reasons.status');
+            Route::post('debit-deliveryman-reasons/store', 'DebitDeliverymanReasonController@store')->name('debit-deliveryman-reasons.store');
+            Route::put('debit-deliveryman-reasons/update', 'DebitDeliverymanReasonController@update')->name('debit-deliveryman-reasons.update');
+            Route::delete('debit-deliveryman-reasons/destroy/{id}', 'DebitDeliverymanReasonController@destroy')->name('debit-deliveryman-reasons.destroy');
+
             Route::post('automated-message/store', 'AutomatedMessageController@store')->name('automated_message.store');
             Route::put('automated-message/update', 'AutomatedMessageController@update')->name('automated_message.update');
             Route::get('automated-message/status/{id}/{status}', 'AutomatedMessageController@status')->name('automated_message.status');

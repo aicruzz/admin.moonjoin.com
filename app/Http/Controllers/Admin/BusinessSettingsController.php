@@ -74,8 +74,9 @@ class BusinessSettingsController extends Controller
             $reasons = OrderCancelReason::when($request->type && ($request->type != 'all'), function ($query) use ($request) {
                 $query->where('user_type', $request->type);
             })->latest()->paginate(config('default_pagination'));
-            
-             $debitReasons = \App\Models\DebitDeliverymanReason::when(request('debit_type') && request('debit_type') != 'all',
+
+            $debitReasons = \App\Models\DebitDeliverymanReason::when(
+                request('debit_type') && request('debit_type') != 'all',
                 fn($q) => $q->where('user_type', request('debit_type'))
             )
                 ->latest()
@@ -376,8 +377,8 @@ class BusinessSettingsController extends Controller
         }
 
         $store_disbursement_type = $request['store_disbursement_type'] ?? 'manual';
-        $dm_disbursement_type    = $request['dm_disbursement_type']    ?? 'manual';
-        $ve_disbursement_type    = $request['ve_disbursement_type']    ?? 'manual';
+        $dm_disbursement_type = $request['dm_disbursement_type'] ?? 'manual';
+        $ve_disbursement_type = $request['ve_disbursement_type'] ?? 'manual';
 
         // Save the separate type keys.
         Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_type'], [
@@ -454,7 +455,7 @@ class BusinessSettingsController extends Controller
 
         // ── Cron command generation ───────────────────────────────────────────────
         if (function_exists('exec')) {
-            $data       = self::generateCronCommand($store_disbursement_type, $dm_disbursement_type, $ve_disbursement_type);
+            $data = self::generateCronCommand($store_disbursement_type, $dm_disbursement_type, $ve_disbursement_type);
             $scriptPath = 'script.sh';
             exec('sh ' . $scriptPath);
 
@@ -606,24 +607,24 @@ class BusinessSettingsController extends Controller
         $scriptFilename = $_SERVER['SCRIPT_FILENAME'];
         $rootPath = dirname($scriptFilename);
 
-        $dmScriptPath    = $rootPath . '/artisan dm:disbursement';
+        $dmScriptPath = $rootPath . '/artisan dm:disbursement';
         $storeScriptPath = $rootPath . '/artisan store:disbursement';
-        $veScriptPath    = $rootPath . '/artisan ve:disbursement';
+        $veScriptPath = $rootPath . '/artisan ve:disbursement';
 
         // Clear old cron entries
-        $dmClearCronCommand    = "(crontab -l | grep -v \"$dm_system_php_path $dmScriptPath\") | crontab -";
+        $dmClearCronCommand = "(crontab -l | grep -v \"$dm_system_php_path $dmScriptPath\") | crontab -";
         $storeClearCronCommand = "(crontab -l | grep -v \"$system_php_path $storeScriptPath\") | crontab -";
-        $veClearCronCommand    = "(crontab -l | grep -v \"$system_php_path $veScriptPath\") | crontab -";
+        $veClearCronCommand = "(crontab -l | grep -v \"$system_php_path $veScriptPath\") | crontab -";
 
         // Only add cron line if type is automated
-        $dmCronCommand    = $dm_disbursement_type    == 'automated' ? "(crontab -l ; echo \"$dmSchedule $dm_system_php_path $dmScriptPath\") | crontab -" : '';
+        $dmCronCommand = $dm_disbursement_type == 'automated' ? "(crontab -l ; echo \"$dmSchedule $dm_system_php_path $dmScriptPath\") | crontab -" : '';
         $storeCronCommand = $store_disbursement_type == 'automated' ? "(crontab -l ; echo \"$storeSchedule $system_php_path $storeScriptPath\") | crontab -" : '';
-        $veCronCommand    = $ve_disbursement_type    == 'automated' ? "(crontab -l ; echo \"$veSchedule $system_php_path $veScriptPath\") | crontab -" : '';
+        $veCronCommand = $ve_disbursement_type == 'automated' ? "(crontab -l ; echo \"$veSchedule $system_php_path $veScriptPath\") | crontab -" : '';
 
         // Write shell script
-        $scriptContent  = "#!/bin/bash\n";
+        $scriptContent = "#!/bin/bash\n";
         $scriptContent .= $dmClearCronCommand . "\n";
-        $scriptContent .= ($dmCronCommand    ? $dmCronCommand    . "\n" : '');
+        $scriptContent .= ($dmCronCommand ? $dmCronCommand . "\n" : '');
         $scriptContent .= $storeClearCronCommand . "\n";
         $scriptContent .= ($storeCronCommand ? $storeCronCommand . "\n" : '');
         $scriptContent .= $veClearCronCommand . "\n";
@@ -633,9 +634,9 @@ class BusinessSettingsController extends Controller
         file_put_contents($scriptFilePath, $scriptContent);
 
         return [
-            'dmCronCommand'    => $dmCronCommand,
+            'dmCronCommand' => $dmCronCommand,
             'storeCronCommand' => $storeCronCommand,
-            'veCronCommand'    => $veCronCommand,
+            'veCronCommand' => $veCronCommand,
         ];
     }
 
@@ -1361,11 +1362,11 @@ class BusinessSettingsController extends Controller
             ];
         } elseif ($request['gateway'] == '9psb') {
             $additional_data = [
-        'status' => 'required|in:1,0',
-        'secret' => 'required_if:status,1',
-        'public' => 'required_if:status,1',
-        'merchant_id' => 'required_if:status,1',
-    ];
+                'status' => 'required|in:1,0',
+                'secret' => 'required_if:status,1',
+                'public' => 'required_if:status,1',
+                'merchant_id' => 'required_if:status,1',
+            ];
         }
 
         $request->validate(array_merge($validation, $additional_data));
@@ -7793,22 +7794,22 @@ class BusinessSettingsController extends Controller
         Toastr::success(translate('messages.React_promotional_banner_status_updated'));
         return back();
     }
-    
-        // -------------------------------------------------------
+
+    // -------------------------------------------------------
     // Debit Deliveryman Reasons
     // -------------------------------------------------------
 
     public function debitReasonStore(Request $request)
     {
         $request->validate([
-            'reason'    => 'required',
+            'reason' => 'required',
             'user_type' => 'required|in:admin,store,deliveryman',
         ]);
 
         $reason = DebitDeliverymanReason::create([
-            'reason'    => $request->reason[0],
+            'reason' => $request->reason[0],
             'user_type' => $request->user_type,
-            'status'    => 1,
+            'status' => 1,
         ]);
 
         // Save translations
@@ -7818,9 +7819,9 @@ class BusinessSettingsController extends Controller
                     Translation::updateOrInsert(
                         [
                             'translationable_type' => DebitDeliverymanReason::class,
-                            'translationable_id'   => $reason->id,
-                            'locale'               => $lang,
-                            'key'                  => 'reason',
+                            'translationable_id' => $reason->id,
+                            'locale' => $lang,
+                            'key' => 'reason',
                         ],
                         ['value' => $request->reason[$index]]
                     );
@@ -7841,7 +7842,7 @@ class BusinessSettingsController extends Controller
 
         $reason = DebitDeliverymanReason::findOrFail($request->reason_id);
         $reason->update([
-            'reason'    => $request->reason[0],
+            'reason' => $request->reason[0],
             'user_type' => $request->user_type,
         ]);
 
@@ -7852,9 +7853,9 @@ class BusinessSettingsController extends Controller
                     Translation::updateOrInsert(
                         [
                             'translationable_type' => DebitDeliverymanReason::class,
-                            'translationable_id'   => $reason->id,
-                            'locale'               => $lang,
-                            'key'                  => 'reason',
+                            'translationable_id' => $reason->id,
+                            'locale' => $lang,
+                            'key' => 'reason',
                         ],
                         ['value' => $request->reason[$index]]
                     );
