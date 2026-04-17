@@ -626,7 +626,7 @@
                                 </li>
 
                                 <li class="nav-item {{ Request::is('vendor-panel/employee/wallet-method*') ? 'active' : '' }}">
-                                    <a class="nav-link " href="#"
+                                    <a class="nav-link " href="{{ route('vendor.employee.wallet-method.index') }}"
                                         title="{{ translate('messages.disbursement_method') }}">
                                         <span class="tio-circle nav-indicator-icon"></span>
                                         <span class="text-truncate">{{ translate('messages.disbursement_method') }}</span>

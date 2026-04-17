@@ -118,6 +118,7 @@ Route::group(['namespace' => 'Vendor', 'as' => 'vendor.'], function () {
         Route::get('list-export', 'EmployeeController@list_export')->name('export-employee');
         Route::get('wallet', 'EmployeeWalletController@index')->name('wallet.index');
         Route::post('wallet/debit', 'EmployeeWalletController@debit')->name('wallet.debit');
+        Route::get('wallet-method', 'EmployeeWalletController@wallet_method')->name('wallet-method.index');
     });
 
         Route::group(['prefix' => 'item', 'as' => 'item.', 'middleware' => ['module:item' ,'subscription:item']], function () {
