@@ -77,4 +77,14 @@ class EmployeeWalletController extends Controller
             'message' => __('Wallet debited successfully.'),
         ], 200);
     }
+
+    public function wallet_method(Request $request)
+    {
+        $withdrawal_methods = \App\Models\WithdrawalMethod::where('is_active', 1)->get();
+        // Assume vendor employee handles their own withdrawal methods or vendor handles them
+        // For now, this is an empty placeholder layout as requested.
+        $vendor_withdrawal_methods = collect([]); 
+        
+        return view('vendor-views.employee-wallet.wallet-method-index', compact('withdrawal_methods','vendor_withdrawal_methods'));
+    }
 }
