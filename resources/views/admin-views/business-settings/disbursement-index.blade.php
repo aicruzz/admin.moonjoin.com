@@ -22,10 +22,14 @@
     @php($store_disbursement_type = $store_disbursement_type ? $store_disbursement_type->value : 'manual')
     @php($dm_disbursement_type = \App\Models\BusinessSetting::where('key', 'dm_disbursement_type')->first())
     @php($dm_disbursement_type = $dm_disbursement_type ? $dm_disbursement_type->value : 'manual')
+    @php($ve_disbursement_type = \App\Models\BusinessSetting::where('key', 've_disbursement_type')->first())
+    @php($ve_disbursement_type = $ve_disbursement_type ? $ve_disbursement_type->value : 'manual')
     @php($store_disbursement_command = \App\Models\BusinessSetting::where('key', 'store_disbursement_command')->first())
     @php($store_disbursement_command = $store_disbursement_command ? $store_disbursement_command->value : '')
     @php($dm_disbursement_command = \App\Models\BusinessSetting::where('key', 'dm_disbursement_command')->first())
     @php($dm_disbursement_command = $dm_disbursement_command ? $dm_disbursement_command->value : '')
+    @php($ve_disbursement_command = \App\Models\BusinessSetting::where('key', 've_disbursement_command')->first())
+    @php($ve_disbursement_command = $ve_disbursement_command ? $ve_disbursement_command->value : '')
 
     <form action="{{ route('admin.business-settings.update-disbursement') }}" method="post" enctype="multipart/form-data">
         @csrf
@@ -339,6 +343,143 @@
                             </div>
                         </div>
 
+                        <hr class="my-4">
+
+                        {{-- ===================== VENDOR EMPLOYEE PANEL ===================== --}}
+                        <div class="row g-3 mb-2">
+                            <div class="col-12">
+                                <h5 class="mb-3">{{ translate('Vendor_Employee') }}</h5>
+                            </div>
+
+                            <div class="col-6">
+                                <div class="form-group">
+                                    <label class="input-label text-capitalize d-flex align-items-center">
+                                        <span class="line--limit-1">{{ translate('Disbursement_Request_Type') }}</span>
+                                        <span class="form-label-secondary"
+                                              data-toggle="tooltip" data-placement="right"
+                                              data-original-title="{{ translate('Choose_Manual_or_Automated_Disbursement_Requests._In_Automated_mode,_withdrawal_requests_for_disbursement_are_generated_automatically;_in_Manual_mode,_vendor_employees_need_to_request_withdrawals_manually.') }}">
+                                            <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="{{ translate('messages.Disbursement_Request_Type') }}">
+                                        </span>
+                                    </label>
+                                    <div class="restaurant-type-group border">
+                                        <label class="form-check form--check mr-2 mr-md-4">
+                                            <input class="form-check-input" type="radio" value="manual"
+                                                   name="ve_disbursement_type" id="ve_disbursement_type_manual"
+                                                {{ $ve_disbursement_type == 'manual' ? 'checked' : '' }}>
+                                            <span class="form-check-label">{{ translate('manual') }}</span>
+                                        </label>
+                                        <label class="form-check form--check mr-2 mr-md-4">
+                                            <input class="form-check-input" type="radio" value="automated"
+                                                   name="ve_disbursement_type" id="ve_disbursement_type_automated"
+                                                {{ $ve_disbursement_type == 'automated' ? 'checked' : '' }}>
+                                            <span class="form-check-label">{{ translate('automated') }}</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-12 ve_automated_section {{ $ve_disbursement_type == 'manual' ? 'd-none' : '' }}">
+                                <div class="__bg-F8F9FC-card">
+                                    <div class="row">
+                                        @php($ve_disbursement_time_period = \App\Models\BusinessSetting::where('key', 've_disbursement_time_period')->first())
+                                        @php($ve_disbursement_time_period = $ve_disbursement_time_period ? $ve_disbursement_time_period->value : 'daily')
+
+                                        <div class="{{ $ve_disbursement_time_period == 'weekly' ? 'col-6' : 'col-12' }}" id="ve_time_period_section">
+                                            <div class="form-group lang_form default-form">
+                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                    <label for="ve_disbursement_time_period" class="form-label text-capitalize m-0">
+                                                        {{ translate('Create_Disbursements') }}
+                                                        <span class="input-label-secondary text--title" data-toggle="tooltip" data-placement="right"
+                                                              data-original-title="{{ translate('Choose_how_the_disbursement_request_will_be_generated:_Monthly,_Weekly_or_Daily.') }}">
+                                                            <i class="tio-info-outined"></i>
+                                                        </span>
+                                                    </label>
+                                                </div>
+                                                <select name="ve_disbursement_time_period" id="ve_disbursement_time_period" class="form-control">
+                                                    <option value="daily" {{ $ve_disbursement_time_period == 'daily' ? 'selected' : '' }}>{{ translate('messages.daily') }}</option>
+                                                    <option value="weekly" {{ $ve_disbursement_time_period == 'weekly' ? 'selected' : '' }}>{{ translate('messages.weekly') }}</option>
+                                                    <option value="monthly" {{ $ve_disbursement_time_period == 'monthly' ? 'selected' : '' }}>{{ translate('messages.monthly') }}</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        @php($ve_disbursement_week_start = \App\Models\BusinessSetting::where('key', 've_disbursement_week_start')->first())
+                                        @php($ve_disbursement_week_start = $ve_disbursement_week_start ? $ve_disbursement_week_start->value : 'saturday')
+                                        <div class="col-6 {{ $ve_disbursement_time_period == 'weekly' ? '' : 'd-none' }}" id="ve_week_day_section">
+                                            <div class="form-group lang_form default-form">
+                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                    <label for="ve_disbursement_week_start" class="form-label text-capitalize m-0">
+                                                        {{ translate('Week_Start') }}
+                                                        <span class="input-label-secondary text--title" data-toggle="tooltip" data-placement="right"
+                                                              data-original-title="{{ translate('Choose_when_the_week_starts_for_the_new_disbursement_request._This_section_will_only_appear_when_weekly_disbursement_is_selected.') }}">
+                                                            <i class="tio-info-outined"></i>
+                                                        </span>
+                                                    </label>
+                                                </div>
+                                                <select name="ve_disbursement_week_start" id="ve_disbursement_week_start" class="form-control">
+                                                    @foreach(['saturday','sunday','monday','tuesday','wednesday','thursday','friday'] as $day)
+                                                        <option value="{{ $day }}" {{ $ve_disbursement_week_start == $day ? 'selected' : '' }}>{{ translate('messages.'.$day) }}</option>
+                                                    @endforeach
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div class="col-6">
+                                            @php($ve_disbursement_create_time = \App\Models\BusinessSetting::where('key', 've_disbursement_create_time')->first())
+                                            @php($ve_disbursement_create_time = $ve_disbursement_create_time ? $ve_disbursement_create_time->value : '')
+                                            <div class="form-group lang_form default-form">
+                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                    <label for="ve_disbursement_create_time" class="form-label text-capitalize m-0">
+                                                        {{ translate('Create_Time') }}
+                                                        <span class="input-label-secondary text--title" data-toggle="tooltip" data-placement="right"
+                                                              data-original-title="{{ translate('Define_when_the_new_disbursement_request_will_be_generated_automatically.') }}">
+                                                            <i class="tio-info-outined"></i>
+                                                        </span>
+                                                    </label>
+                                                </div>
+                                                <input id="ve_disbursement_create_time" type="time" class="form-control h--45px"
+                                                       name="ve_disbursement_create_time" value="{{ $ve_disbursement_create_time }}">
+                                            </div>
+                                        </div>
+
+                                        <div class="col-6">
+                                            @php($ve_disbursement_min_amount = \App\Models\BusinessSetting::where('key', 've_disbursement_min_amount')->first())
+                                            @php($ve_disbursement_min_amount = $ve_disbursement_min_amount ? $ve_disbursement_min_amount->value : '')
+                                            <div class="form-group lang_form default-form">
+                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                    <label for="ve_disbursement_min_amount" class="form-label text-capitalize m-0">
+                                                        {{ translate('Minimum_Amount') }}
+                                                        <span class="input-label-secondary text--title" data-toggle="tooltip" data-placement="right"
+                                                              data-original-title="{{ translate('Enter_the_minimum_amount_to_be_eligible_for_generating_an_auto-disbursement_request.') }}">
+                                                            <i class="tio-info-outined"></i>
+                                                        </span>
+                                                    </label>
+                                                </div>
+                                                <input id="ve_disbursement_min_amount" type="number" placeholder="{{ translate('Ex:_100') }}"
+                                                       class="form-control h--45px" min="1" name="ve_disbursement_min_amount" value="{{ $ve_disbursement_min_amount }}">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    @php($ve_disbursement_waiting_time = \App\Models\BusinessSetting::where('key', 've_disbursement_waiting_time')->first())
+                                    @php($ve_disbursement_waiting_time = $ve_disbursement_waiting_time ? $ve_disbursement_waiting_time->value : '')
+                                    <div class="form-group lang_form default-form">
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <label for="ve_disbursement_waiting_time" class="form-label text-capitalize m-0">
+                                                {{ translate('Days_needed_to_complete_disbursement') }}
+                                                <span class="input-label-secondary text--title" data-toggle="tooltip" data-placement="right"
+                                                      data-original-title="{{ translate('Enter_the_number_of_days_in_which_the_disbursement_will_be_completed.') }}">
+                                                    <i class="tio-info-outined"></i>
+                                                </span>
+                                            </label>
+                                        </div>
+                                        <input id="ve_disbursement_waiting_time" type="number" min="1" placeholder="{{ translate('Ex:_7') }}"
+                                               class="form-control h--45px" name="ve_disbursement_waiting_time" value="{{ $ve_disbursement_waiting_time }}">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="btn--container justify-content-end">
                             <button type="reset" id="reset_btn" class="btn btn--reset location-reload">{{ translate('messages.reset') }}</button>
                             <button type="submit" id="submit" class="btn btn--primary">{{ translate('messages.save_information') }}</button>
@@ -371,9 +512,14 @@
                         <button class="btn btn-primary copy-btn copy-to-clipboard" data-id="storeDisbursementCommand">{{ translate('Copy') }}</button>
                     </div>
                     <label for="dmDisbursementCommand" class="form-label text-capitalize">{{ translate('Delivery_Man_Cron_Command') }}</label>
-                    <div class="input--group input-group">
+                    <div class="input--group input-group mb-3">
                         <input type="text" value="{{ $dm_disbursement_command }}" class="form-control" id="dmDisbursementCommand" readonly>
                         <button class="btn btn-primary copy-btn copy-to-clipboard" data-id="dmDisbursementCommand">{{ translate('Copy') }}</button>
+                    </div>
+                    <label for="veDisbursementCommand" class="form-label text-capitalize">{{ translate('Vendor_Employee_Cron_Command') }}</label>
+                    <div class="input--group input-group">
+                        <input type="text" value="{{ $ve_disbursement_command }}" class="form-control" id="veDisbursementCommand" readonly>
+                        <button class="btn btn-primary copy-btn copy-to-clipboard" data-id="veDisbursementCommand">{{ translate('Copy') }}</button>
                     </div>
                 </div>
             </div>
@@ -435,6 +581,28 @@
                 } else {
                     $('#dm_week_day_section').addClass('d-none');
                     $('#dm_time_period_section').removeClass('col-6').addClass('col-12');
+                }
+            });
+
+            // ── VE radio — controls VE panel independently ───────────────────
+            $('input[name="ve_disbursement_type"]').on('change', function () {
+                var val = $(this).val();
+
+                if (val === 'automated') {
+                    $('.ve_automated_section').removeClass('d-none').show();
+                } else {
+                    $('.ve_automated_section').addClass('d-none').hide();
+                }
+            });
+
+            // ── VE: weekly day-of-week visibility ───────────────────────────
+            $('#ve_disbursement_time_period').on('change', function () {
+                if ($(this).val() === 'weekly') {
+                    $('#ve_week_day_section').removeClass('d-none');
+                    $('#ve_time_period_section').removeClass('col-12').addClass('col-6');
+                } else {
+                    $('#ve_week_day_section').addClass('d-none');
+                    $('#ve_time_period_section').removeClass('col-6').addClass('col-12');
                 }
             });
 
