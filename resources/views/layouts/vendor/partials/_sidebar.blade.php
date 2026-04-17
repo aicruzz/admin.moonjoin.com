@@ -605,6 +605,37 @@
                     @endif
                     <!-- End StoreWallet -->
 
+                    @if (\App\CentralLogics\Helpers::employee_module_permission_check('employee'))
+                        <li class="navbar-vertical-aside-has-menu {{ Request::is('vendor-panel/employee/wallet*') || Request::is('vendor-panel/employee/wallet-method*') || Request::is('vendor-panel/employee-wallet*') ? 'active' : '' }}">
+                            <a class="js-navbar-vertical-aside-menu-link nav-link nav-link-toggle" href="javascript:"
+                                title="{{ translate('messages.employee_wallet_management') }}">
+                                <i class="tio-money nav-icon"></i>
+                                <span class="navbar-vertical-aside-mini-mode-hidden-elements text-truncate">
+                                    {{ translate('messages.employee_wallet_management') }}
+                                </span>
+                            </a>
+                            <ul class="js-navbar-vertical-aside-submenu nav nav-sub"
+                                style="display: {{ Request::is('vendor-panel/employee/wallet*') || Request::is('vendor-panel/employee/wallet-method*') || Request::is('vendor-panel/employee-wallet*') ? 'block' : 'none' }}">
+                                
+                                <li class="nav-item {{ Request::is('vendor-panel/employee/wallet') || Request::is('vendor-panel/employee-wallet') ? 'active' : '' }}">
+                                    <a class="nav-link " href="{{ route('vendor.employee.wallet.index') }}"
+                                        title="{{ translate('messages.employee_wallet') }}">
+                                        <span class="tio-circle nav-indicator-icon"></span>
+                                        <span class="text-truncate">{{ translate('messages.employee_wallet') }}</span>
+                                    </a>
+                                </li>
+
+                                <li class="nav-item {{ Request::is('vendor-panel/employee/wallet-method*') ? 'active' : '' }}">
+                                    <a class="nav-link " href="#"
+                                        title="{{ translate('messages.disbursement_method') }}">
+                                        <span class="tio-circle nav-indicator-icon"></span>
+                                        <span class="text-truncate">{{ translate('messages.disbursement_method') }}</span>
+                                    </a>
+                                </li>
+                            </ul>
+                        </li>
+                    @endif
+
 
 
 
@@ -664,24 +695,7 @@
                     @endif
                     <!-- End Employee -->
 
-                @if (\App\CentralLogics\Helpers::employee_module_permission_check('employee'))
-                    <li class="nav-item">
-                        <small class="nav-subtitle"
-                            title="{{ translate('messages.employee_wallet_section') }}">{{ translate('messages.employee_wallet_section') }}</small>
-                        <small class="tio-more-horizontal nav-subtitle-replacer"></small>
-                    </li>
 
-                    <li class="navbar-vertical-aside-has-menu {{ Request::is('vendor-panel/employee-wallet*') ? 'active' : '' }}">
-                        <a class="js-navbar-vertical-aside-menu-link nav-link"
-                            href="{{ route('vendor.employee.wallet.index') }}"
-                            title="{{ translate('messages.debit_employee_wallet') }}">
-                            <i class="tio-money nav-icon"></i>
-                            <span class="navbar-vertical-aside-mini-mode-hidden-elements text-truncate">
-                                {{ translate('messages.debit_employee_wallet') }}
-                            </span>
-                        </a>
-                    </li>
-                @endif
                     @if (
                         \App\CentralLogics\Helpers::employee_module_permission_check('expense_report') ||
                             \App\CentralLogics\Helpers::employee_module_permission_check('vat_report') ||
