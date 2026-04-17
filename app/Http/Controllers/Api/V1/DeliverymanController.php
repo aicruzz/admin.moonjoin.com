@@ -1463,7 +1463,7 @@ class DeliverymanController extends Controller
     }
     public function request_withdraw(Request $request)
     {
-        \Log::info('STEP 1 - REQUEST HIT', $request->all());
+        \Log::info('STEP 1 - DeliveryMan REQUEST HIT', $request->all());
 
         $validator = Validator::make($request->all(), [
             'amount' => 'required|numeric|min:0.01',
