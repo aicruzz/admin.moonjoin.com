@@ -25,6 +25,7 @@ use App\Http\Controllers\Admin\Item\AddonController;
 use App\Http\Controllers\Admin\Item\BrandController;
 use App\Http\Controllers\Admin\Banner\BannerController;
 use App\Http\Controllers\Admin\Coupon\CouponController;
+use App\Http\Controllers\Admin\BusinessSettingsController;
 use App\Http\Controllers\Admin\Item\CategoryController;
 use App\Http\Controllers\Admin\Module\ModuleController;
 use App\Http\Controllers\Admin\Item\AttributeController;
@@ -36,6 +37,7 @@ use App\Http\Controllers\Admin\Item\CommonConditionController;
 use App\Http\Controllers\Admin\DeliveryMan\DmVehicleController;
 use App\Http\Controllers\Admin\DeliveryMan\DeliveryManController;
 use App\Http\Controllers\Admin\Item\AddonCategoryController;
+
 use App\Http\Controllers\Admin\Promotion\AdvertisementController;
 use App\Http\Controllers\Admin\Notification\NotificationController;
 use App\Http\Controllers\Admin\Subscription\SubscriptionController;
@@ -270,11 +272,16 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
                 Route::get(Module::EXPORT[URI], [ModuleController::class, 'exportList'])->name('export');
                 Route::get(Module::SHOW[URI] . '/{id}', [ModuleController::class, 'show'])->name('show')->withoutMiddleware('module:module');
             });
-            
-                        Route::post('debit-reasons/store',          [BusinessSettingsController::class, 'debitReasonStore'])->name('debit-reasons.store');
-            Route::put('debit-reasons/update',          [BusinessSettingsController::class, 'debitReasonUpdate'])->name('debit-reasons.update');
+
+            Route::post('debit-reasons/store', [BusinessSettingsController::class, 'debitReasonStore'])->name('debit-reasons.store');
+            Route::put('debit-reasons/update', [BusinessSettingsController::class, 'debitReasonUpdate'])->name('debit-reasons.update');
             Route::get('debit-reasons/status/{id}/{status}', [BusinessSettingsController::class, 'debitReasonStatus'])->name('debit-reasons.status');
-            Route::delete('debit-reasons/{id}',         [BusinessSettingsController::class, 'debitReasonDestroy'])->name('debit-reasons.destroy');
+            Route::delete('debit-reasons/{id}', [BusinessSettingsController::class, 'debitReasonDestroy'])->name('debit-reasons.destroy');
+
+            Route::post('debit-vendor-employee-reasons/store', [BusinessSettingsController::class, 'debitReasonStore'])->name('debit-vendor-employee-reasons.store');
+            Route::put('debit-vendor-employee-reasons/update', [BusinessSettingsController::class, 'debitReasonUpdate'])->name('debit-vendor-employee-reasons.update');
+            Route::get('debit-vendor-employee-reasons/status/{id}/{status}', [BusinessSettingsController::class, 'debitReasonStatus'])->name('debit-vendor-employee-reasons.status');
+            Route::delete('debit-vendor-employee-reasons/{id}', [BusinessSettingsController::class, 'debitReasonDestroy'])->name('debit-vendor-employee-reasons.destroy');
 
         });
 

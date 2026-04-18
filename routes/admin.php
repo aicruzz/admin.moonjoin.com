@@ -359,8 +359,10 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
             Route::post('review-section/update/{id}', 'BusinessSettingsController@review_update')->name('review-update');
             Route::delete('review/delete/{review}', 'BusinessSettingsController@review_destroy')->name('review-delete');
             Route::get('pages/react-landing-page-settings/{tab?}', 'BusinessSettingsController@react_landing_page_settings')->name('react-landing-page-settings');
-            Route::POST('pages/react-landing-page-settings/{tab?}',
-                'BusinessSettingsController@update_react_landing_page_settings')->name('react-landing-page-settings');
+            Route::POST(
+                'pages/react-landing-page-settings/{tab?}',
+                'BusinessSettingsController@update_react_landing_page_settings'
+            )->name('react-landing-page-settings');
             Route::DELETE('react-landing-page-settings/{tab}/{key}', 'BusinessSettingsController@delete_react_landing_page_settings')->name('react-landing-page-settings-delete');
             Route::get('review-react-status/{id}/{status}', 'BusinessSettingsController@review_react_status')->name('review-react-status');
             Route::get('pages/react-landing-page-settings/testimonials/review-react-list/edit/{id}', 'BusinessSettingsController@review_react_edit')->name('review-react-edit');
@@ -838,7 +840,7 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
                 Route::get('get-Withdraw-Details', [DeliveryManController::class, 'getWithdrawDetails'])->name('getWithdrawDetails');
 
             });
-            
+
             Route::group(['prefix' => 'debit-delivery-man', 'as' => 'debit-delivery-man.', 'middleware' => ['module:debit_delivery_man']], function () {
                 Route::get('/', 'DebitDeliveryManController@index')->name('index');
                 Route::post('store', 'DebitDeliveryManController@store')->name('store');

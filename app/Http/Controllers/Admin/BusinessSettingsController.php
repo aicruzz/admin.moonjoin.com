@@ -11,6 +11,7 @@ use App\Models\AdminSpecialCriteria;
 use App\Models\AdminTestimonial;
 use App\Models\AutomatedMessage;
 use App\Models\BusinessSetting;
+use App\Models\DebitVendorEmployeeReason;
 use App\Models\Currency;
 use App\Models\DataSetting;
 use App\Models\FAQ;
@@ -7886,4 +7887,90 @@ class BusinessSettingsController extends Controller
         return back();
     }
 
+    // -------------------------------------------------------
+    // Debit Store Reasons
+    // -------------------------------------------------------
+    public function debitStoreReasonStore(Request $request)
+    {
+        $request->validate([
+            'reason' => 'required',
+            'user_type' => 'required|in:store',
+        ]);
+
+        $reason = DebitStoreReason::create([
+            'reason' => $request->reason[0],
+            'user_type' => $request->user_type,
+            'status' => 1,
+        ]);
+
+        if ($request->lang) {
+            foreach ($request->lang as $index => $lang) {
+                if ($lang !== 'default' && isset($request->reason[$index])) {
+                    Translation::updateOrInsert(
+                        [
+                            'translationable_type' => DebitStoreReason::class,
+                            'translationable_id' => $reason->id,
+                            'locale' => $lang,
+                            'key' => 'reason',
+                        ],
+                        ['value' => $request->reason[$index]]
+                    );
+                }
+            }
+        }
+
+        Toastr::success(translate('messages.Debit_reason_added_successfully'));
+        return back();
+    }
+
+    public function debitStoreReasonUpdate(Request $request)
+    {
+        $request->validate([
+            'reason_id' => 'required|exists:debit_store_reasons,id',
+            'user_type' => 'required|in:store',
+        ]);
+
+        $reason = DebitStoreReason::findOrFail($request->reason_id);
+        $reason->update([
+            'reason' => $request->reason[0],
+            'user_type' => $request->user_type,
+        ]);
+
+        if ($request->lang1) {
+            foreach ($request->lang1 as $index => $lang) {
+                if ($lang !== 'default' && isset($request->reason[$index])) {
+                    Translation::updateOrInsert(
+                        [
+                            'translationable_type' => DebitStoreReason::class,
+                            'translationable_id' => $reason->id,
+                            'locale' => $lang,
+                            'key' => 'reason',
+                        ],
+                        ['value' => $request->reason[$index]]
+                    );
+                }
+            }
+        }
+
+        Toastr::success(translate('messages.Debit_reason_updated_successfully'));
+        return back();
+    }
+
+    public function debitStoreReasonStatus($id, $status)
+    {
+        DebitStoreReason::findOrFail($id)->update(['status' => $status]);
+        Toastr::success(translate('messages.Status_updated_successfully'));
+        return back();
+    }
+
+    public function debitStoreReasonDestroy($id)
+    {
+        $reason = DebitStoreReason::findOrFail($id);
+        Translation::where('translationable_type', DebitStoreReason::class)
+            ->where('translationable_id', $id)
+            ->delete();
+        $reason->delete();
+        Toastr::success(translate('messages.Debit_reason_deleted_successfully'));
+        return back();
+    }
 }
