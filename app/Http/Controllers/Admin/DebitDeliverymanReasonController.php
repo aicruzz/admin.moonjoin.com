@@ -21,6 +21,8 @@ class DebitDeliverymanReasonController extends Controller
 
         $reason = new DebitDeliverymanReason();
         $reason->reason     = $request->reason[array_search('default', $request->lang)];
+        $reason->user_type  = 'deliveryman';
+        $reason->status     = 1;
         $reason->created_at = now();
         $reason->updated_at = now();
         $reason->save();

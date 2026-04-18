@@ -75,8 +75,10 @@ class DebitDeliveryManController extends Controller
             // Deduct from total_earning so balance reduces
             $dm->wallet->decrement('total_earning', $request['amount']);
 
+            $reason_text = \App\Models\DebitDeliverymanReason::find($request['reason'])?->reason ?? $request['reason'];
+
             // Send push notification + save in-app notification for the delivery man
-            $this->sendDebitNotification($dm, $request['amount'], $request['reason']);
+            $this->sendDebitNotification($dm, $request['amount'], $reason_text);
 
             DB::commit();
 

@@ -65,7 +65,7 @@
                                         <option value="{{ $dm_reason->id }}">{{ $dm_reason->reason }}</option>
                                     @empty
                                         <option value="" disabled>
-                                            {{ translate('No reasons configured. Please add them in Order Settings.') }}
+                                            {{ translate('No reasons configured. Please add them in Delivery Man Settings.') }}
                                         </option>
                                     @endforelse
                                 </select>

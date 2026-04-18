@@ -967,7 +967,7 @@
                                                             @csrf
                                                             @method('put')
 
-                                                            @php($dm_edit = \App\Models\OrderCancelReason::withoutGlobalScope('translate')->with('translations')->find($dm_reason->id))
+                                                            @php($dm_edit = \App\Models\DebitDeliverymanReason::withoutGlobalScope('translate')->with('translations')->find($dm_reason->id))
                                                             @php($dm_edit_lang = \App\Models\BusinessSetting::where('key', 'language')->first())
                                                             @php($dm_edit_lang = $dm_edit_lang->value ?? null)
 
