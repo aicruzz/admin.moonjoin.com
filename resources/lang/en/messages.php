@@ -1,4 +1,4 @@
-<?php return array (
+<?php return array(
   'attributes' => 'Attributes',
   'add_new_attribute' => 'Add new attribute',
   'default' => 'Default',
@@ -698,6 +698,7 @@
   'cutlery' => 'Cutlery',
   'item_details' => 'Item details',
   'addons' => 'Addons',
+  'employee_wallet' => 'Employee-Wallet',
   'Variation' => 'Variation',
   'items_price' => 'Items price',
   'addon_cost' => 'Addon cost',

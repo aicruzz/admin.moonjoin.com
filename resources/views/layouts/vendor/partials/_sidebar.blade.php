@@ -601,17 +601,16 @@
                             </a>
                         </li>
                     @endif
-
-                    {{-- My Wallet — visible to logged-in employees only --}}
+                    {{-- Employee Wallet — visible to logged-in employees only --}}
                     @if (auth('vendor_employee')->check())
                         <li
                             class="navbar-vertical-aside-has-menu {{ Request::is('vendor-panel/employee/wallet*') ? 'active' : '' }}">
                             <a class="js-navbar-vertical-aside-menu-link nav-link"
                                 href="{{ route('vendor.employee.wallet.index') }}"
-                                title="{{ translate('messages.my_wallet') }}">
+                                title="{{ translate('messages.employee_wallet') }}">
                                 <i class="tio-wallet nav-icon"></i>
                                 <span class="navbar-vertical-aside-mini-mode-hidden-elements text-truncate">
-                                    {{ translate('messages.my_wallet') }}
+                                    {{ translate('messages.employee_wallet') }}
                                 </span>
                             </a>
                         </li>
