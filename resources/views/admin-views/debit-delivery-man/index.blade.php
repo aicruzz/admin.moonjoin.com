@@ -177,12 +177,7 @@
                                             </td>
                                             <td>
                                                 <span class="badge badge-soft-warning text-capitalize">
-                                                    @php
-                                                        $reason_label = \App\Models\DebitDeliverymanReason::find($record->reason)?->reason
-                                                            ?? \App\Models\OrderCancelReason::find($record->reason)?->reason
-                                                            ?? translate(str_replace('_', ' ', $record->reason));
-                                                    @endphp
-                                                    {{ $reason_label }}
+                                                    {{ $debit_reasons[$record->reason] ?? translate(str_replace('_', ' ', $record->reason)) }}
                                                 </span>
                                             </td>
                                             <td>{{ $record->note ?? '—' }}</td>
