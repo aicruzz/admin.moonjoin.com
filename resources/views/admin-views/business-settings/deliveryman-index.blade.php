@@ -183,8 +183,8 @@
                                             <label class="input-label text-capitalize d-flex align-items-center"><span
                                                     class="line--limit-1 pr-1">{{ translate('messages.Can_A_Deliveryman_Cancel_Order?') }}</span>
                                                 <span class="form-label-secondary" data-toggle="tooltip"
-                                                    data-placement="right"
-                                                    data-original-title="{{ translate('messages.Admin_can_enable/disable_Deliveryman’s_order_cancellation_option_in_the_respective_app.') }}"><i
+                                                    data-placement="right" {{-- FIXED --}}
+                                                    data-original-title="{{ translate('messages.Admin_can_enable/disable_Deliveryman\'s_order_cancellation_option_in_the_respective_app.') }}"><i
                                                         class="tio-info text-light-gray"></i></span></label>
                                             <div class="resturant-type-group border">
                                                 <label class="form-check form--check mr-2 mr-md-4">
@@ -253,7 +253,7 @@
                                                 </span>
                                                 <span class="form-label-secondary" data-toggle="tooltip"
                                                     data-placement="right"
-                                                    data-original-title="{{ translate('messages.If_enabled,_delivery_men_will_be_automatically_suspended_by_the_system_when_their_‘Cash_in_Hand’_limit_is_exceeded.') }}">
+                                                    data-original-title="{{ translate('messages.If_enabled,_delivery_men_will_be_automatically_suspended_by_the_system_when_their_\'Cash_in_Hand\'_limit_is_exceeded.') }}">
                                                     <i class="tio-info text-light-gray"></i>
                                                 </span>
                                             </span>
@@ -600,9 +600,11 @@
                                 </div>
                             @endforeach
                         @endif
-
-                        {{-- No user_type needed — this table is exclusively for debit reasons --}}
                     </div>
+
+                    {{-- FIX (Bug 2): user_type was missing from the store form but present in the update
+                    modal. Added here so the controller receives a consistent value on both paths. --}}
+                    <input type="hidden" name="user_type" value="deliveryman">
 
                     <div class="mt-2 text-muted fs-12">
                         {{ translate('These reasons will appear in the Debit Delivery Man form. Add all valid debit reasons here so admins can select them when deducting from a delivery man\'s wallet.') }}
@@ -705,8 +707,9 @@
                                                         <div class="modal-body">
                                                             @csrf
                                                             @method('put')
-
-                                                            @php($dm_edit = \App\Models\OrderCancelReason::withoutGlobalScope('translate')->with('translations')->find($dm_reason->id))
+                                                            //
+                                                            @php($dm_edit = \App\Models\DebitDeliverymanReason::withoutGlobalScope('translate')->with('translations')->find($dm_reason->id))
+                                                            @php($dm_edit = $dm_reason->loadMissing('translations'))
                                                             @php($dm_edit_lang = \App\Models\BusinessSetting::where('key', 'language')->first())
                                                             @php($dm_edit_lang = $dm_edit_lang->value ?? null)
 
@@ -755,7 +758,7 @@
                                                                             }
                                                                         }
                                                                     }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        ?>
+                                                                                                                                                                                                                                                                                                                                                            ?>
                                                                                                                     <div class="form-group mb-3 d-none dm-update-lang_form"
                                                                                                                         id="dm-edit-{{ $edit_lang }}-langform_{{ $dm_edit->id }}">
                                                                                                                         <label class="form-label">
@@ -772,7 +775,6 @@
                                                                 @endforeach
                                                             @endif
 
-                                                            {{-- Always deliveryman for this section --}}
                                                             <input type="hidden" name="user_type" value="deliveryman">
                                                         </div>
                                                         <div class="modal-footer">
