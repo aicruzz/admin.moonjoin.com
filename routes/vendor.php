@@ -127,6 +127,9 @@ Route::group(['namespace' => 'Vendor', 'as' => 'vendor.'], function () {
                 Route::get('method', 'EmployeeWalletController@wallet_method')->name('method');
                 Route::post('withdraw', 'EmployeeWalletController@withdraw_request')->name('withdraw.request');
                 Route::delete('withdraw/{id}', 'EmployeeWalletController@withdraw_cancel')->name('withdraw.cancel');
+                Route::get('banks', 'EmployeeWalletController@get_banks')->name('banks');
+                Route::post('name-enquiry', 'EmployeeWalletController@name_enquiry')->name('name-enquiry');
+
             });
         });
 

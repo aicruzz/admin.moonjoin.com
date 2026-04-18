@@ -30,6 +30,7 @@ Route::group(['namespace' => 'Api\V1', 'middleware' => 'localization'], function
             Route::post('transaction', 'NinePsbPaymentController@initiateTransaction');
             Route::post('payout', 'NinePsbPaymentController@payoutDeliveryManToBank');
             Route::get('banks', 'NinePsbPaymentController@getBanks');
+            Route::post('name-enquiry', 'NinePsbPaymentController@nameEnquiry')->name('ninepsb.name-enquiry');
         }
     );
     Route::group(

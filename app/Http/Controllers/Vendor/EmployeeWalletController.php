@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Vendor;
 use App\Http\Controllers\Controller;
 use App\Models\VendorEmployee;
 use App\Models\EmployeeWalletTransaction;
+use App\Http\Controllers\Api\V1\NinePsbPaymentController;
 use App\Models\WithdrawalMethod;
 use Illuminate\Http\Request;
 
@@ -17,6 +18,9 @@ class EmployeeWalletController extends Controller
         // ── Employee view — personal wallet only ────────────────
         if (auth('vendor_employee')->check()) {
             $employee = auth('vendor_employee')->user();
+
+            $ve_disbursement_type = \App\Models\BusinessSetting::where('key', 've_disbursement_type')
+                ->first()?->value ?? 'manual';
 
             $transactions = EmployeeWalletTransaction::where('employee_id', $employee->id)
                 ->where('store_id', $store_id)
@@ -57,7 +61,8 @@ class EmployeeWalletController extends Controller
                 'pending_withdraw',
                 'total_withdrawn',
                 'withdrawable_balance',
-                'withdrawal_methods'
+                'withdrawal_methods',
+                've_disbursement_type'
             ));
         }
 
@@ -135,7 +140,10 @@ class EmployeeWalletController extends Controller
     {
         $request->validate([
             'amount' => 'required|numeric|min:0.01',
-            'withdraw_method_id' => 'required|exists:withdrawal_methods,id',
+            'bank_code' => 'required|string',
+            'account_number' => 'required|string|size:10',
+            'account_name' => 'required|string',
+            'bank_name' => 'required|string',
         ]);
 
         $store_id = \App\CentralLogics\Helpers::get_store_id();
@@ -153,8 +161,6 @@ class EmployeeWalletController extends Controller
             return back()->with('error', __('Insufficient withdrawable balance.'));
         }
 
-        $method = WithdrawalMethod::find($request->withdraw_method_id);
-
         EmployeeWalletTransaction::create([
             'employee_id' => $employee->id,
             'store_id' => $store_id,
@@ -162,8 +168,12 @@ class EmployeeWalletController extends Controller
             'type' => 'withdraw',
             'status' => 'pending',
             'reason' => 'Withdrawal Request',
-            'withdrawal_method_id' => $request->withdraw_method_id,
-            'withdrawal_method_fields' => json_encode($request->except(['_token', 'amount', 'withdraw_method_id'])),
+            'withdrawal_method_fields' => json_encode([
+                'account_name' => $request->account_name,
+                'account_number' => $request->account_number,
+                'bank_code' => $request->bank_code,
+                'bank_name' => $request->bank_name,
+            ]),
         ]);
 
         return back()->with('success', __('Withdrawal request submitted successfully.'));
@@ -193,5 +203,15 @@ class EmployeeWalletController extends Controller
             'withdrawal_methods',
             'vendor_withdrawal_methods'
         ));
+    }
+
+    public function get_banks(Request $request)
+    {
+        return (new NinePsbPaymentController)->getBanks($request);
+    }
+
+    public function name_enquiry(Request $request)
+    {
+        return (new NinePsbPaymentController)->nameEnquiry($request);
     }
 }
