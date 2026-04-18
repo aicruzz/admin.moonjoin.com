@@ -549,7 +549,8 @@
                     @if (
                             \App\CentralLogics\Helpers::employee_module_permission_check('wallet') ||
                             \App\CentralLogics\Helpers::employee_module_permission_check('wallet_method') ||
-                            \App\CentralLogics\Helpers::employee_module_permission_check('employee')
+                            \App\CentralLogics\Helpers::employee_module_permission_check('employee') ||
+                            auth('vendor_employee')->check()
                         )
                         <li class="nav-item">
                             <small class="nav-subtitle"
@@ -586,8 +587,8 @@
                         </li>
                     @endif
 
-                    {{-- Employee Wallet Management (moved here from Employee section) --}}
-                    @if (\App\CentralLogics\Helpers::employee_module_permission_check('employee'))
+                    {{-- Debit Employee Wallet — visible to store owner/vendor only --}}
+                    @if (!auth('vendor_employee')->check() && \App\CentralLogics\Helpers::employee_module_permission_check('employee'))
                         <li
                             class="navbar-vertical-aside-has-menu {{ Request::is('vendor-panel/employee-wallet*') ? 'active' : '' }}">
                             <a class="js-navbar-vertical-aside-menu-link nav-link"
@@ -596,6 +597,21 @@
                                 <i class="tio-money nav-icon"></i>
                                 <span class="navbar-vertical-aside-mini-mode-hidden-elements text-truncate">
                                     {{ translate('messages.debit_employee_wallet') }}
+                                </span>
+                            </a>
+                        </li>
+                    @endif
+
+                    {{-- My Wallet — visible to logged-in employees only --}}
+                    @if (auth('vendor_employee')->check())
+                        <li
+                            class="navbar-vertical-aside-has-menu {{ Request::is('vendor-panel/employee/wallet*') ? 'active' : '' }}">
+                            <a class="js-navbar-vertical-aside-menu-link nav-link"
+                                href="{{ route('vendor.employee.wallet.index') }}"
+                                title="{{ translate('messages.my_wallet') }}">
+                                <i class="tio-wallet nav-icon"></i>
+                                <span class="navbar-vertical-aside-mini-mode-hidden-elements text-truncate">
+                                    {{ translate('messages.my_wallet') }}
                                 </span>
                             </a>
                         </li>
