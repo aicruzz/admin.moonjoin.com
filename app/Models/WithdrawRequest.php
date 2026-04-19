@@ -11,26 +11,38 @@ class WithdrawRequest extends Model
     use HasFactory;
 
     protected $casts = [
-        'amount'=>'float'
+        'amount' => 'float',
     ];
 
-    public function vendor(){
+    public function vendor()
+    {
         return $this->belongsTo(Vendor::class);
     }
-    public function store(){
-        return $this->belongsTo(Store::class,'vendor_id','vendor_id');
-    }
-    public function method(){
-        return $this->belongsTo(WithdrawalMethod::class,'withdrawal_method_id');
-    }
 
-
-    public function disbursementMethod(){
-        return $this->belongsTo(DisbursementWithdrawalMethod::class,'withdrawal_method_id');
+    public function store()
+    {
+        return $this->belongsTo(Store::class, 'vendor_id', 'vendor_id');
     }
 
-    public function deliveryman(){
-        return $this->belongsTo(DeliveryMan::class,'delivery_man_id');
+    public function method()
+    {
+        return $this->belongsTo(WithdrawalMethod::class, 'withdrawal_method_id');
+    }
+
+    public function disbursementMethod()
+    {
+        return $this->belongsTo(DisbursementWithdrawalMethod::class, 'withdrawal_method_id');
+    }
+
+    public function deliveryman()
+    {
+        return $this->belongsTo(DeliveryMan::class, 'delivery_man_id');
+    }
+
+    // NEW — Vendor Employee
+    public function vendorEmployee()
+    {
+        return $this->belongsTo(VendorEmployee::class, 'vendor_employee_id');
     }
 
     protected static function booted()

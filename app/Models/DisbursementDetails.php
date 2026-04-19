@@ -16,9 +16,10 @@ class DisbursementDetails extends Model
         'store_id' => 'integer',
         'payment_method' => 'integer',
         'disbursement_amount' => 'float',
-        'is_default'=>'boolean',
+        'is_default' => 'boolean',
+        'vendor_employee_id' => 'integer',
     ];
-    
+
     public function store()
     {
         return $this->belongsTo(Store::class);
@@ -35,6 +36,11 @@ class DisbursementDetails extends Model
 
     public function withdraw_method()
     {
-        return $this->belongsTo(DisbursementWithdrawalMethod::class,'payment_method','id');
+        return $this->belongsTo(DisbursementWithdrawalMethod::class, 'payment_method', 'id');
+    }
+
+    public function vendor_employee()
+    {
+        return $this->belongsTo(VendorEmployee::class, 'vendor_employee_id');
     }
 }

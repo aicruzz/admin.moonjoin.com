@@ -12,7 +12,7 @@ class VendorEmployee extends Authenticatable
 {
     use Notifiable;
 
-    protected $fillable = ['remember_token','login_remember_token'];
+    protected $fillable = ['remember_token', 'login_remember_token'];
 
     protected $casts = [
         'employee_role_id' => 'integer',
@@ -28,17 +28,18 @@ class VendorEmployee extends Authenticatable
         'remember_token',
     ];
     protected $appends = ['image_full_url'];
-    public function getImageFullUrlAttribute(){
+    public function getImageFullUrlAttribute()
+    {
         $value = $this->image;
         if (count($this->storage) > 0) {
             foreach ($this->storage as $storage) {
                 if ($storage['key'] == 'image') {
-                    return Helpers::get_full_url('vendor',$value,$storage['value']);
+                    return Helpers::get_full_url('vendor', $value, $storage['value']);
                 }
             }
         }
 
-        return Helpers::get_full_url('vendor',$value,'public');
+        return Helpers::get_full_url('vendor', $value, 'public');
     }
     public function store()
     {
@@ -50,10 +51,20 @@ class VendorEmployee extends Authenticatable
         return $this->belongsTo(Vendor::class);
     }
 
-    public function role(){
-        return $this->belongsTo(EmployeeRole::class,'employee_role_id');
+    public function role()
+    {
+        return $this->belongsTo(EmployeeRole::class, 'employee_role_id');
     }
 
+    public function wallet()
+    {
+        return $this->hasOne(VendorEmployeeWallet::class, 'vendor_employee_id');
+    }
+
+    public function disbursement_method()
+    {
+        return $this->hasOne(DisbursementWithdrawalMethod::class, 'vendor_employee_id');
+    }
     public function storage()
     {
         return $this->morphMany(Storage::class, 'data');
@@ -70,7 +81,7 @@ class VendorEmployee extends Authenticatable
     {
         parent::boot();
         static::saved(function ($model) {
-            if($model->isDirty('image')){
+            if ($model->isDirty('image')) {
                 $value = Helpers::getDisk();
 
                 DB::table('storages')->updateOrInsert([
