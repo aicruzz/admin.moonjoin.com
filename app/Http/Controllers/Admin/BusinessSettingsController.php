@@ -382,118 +382,48 @@ class BusinessSettingsController extends Controller
         $ve_disbursement_type = $request['ve_disbursement_type'] ?? 'manual';
 
         // Save the separate type keys.
-        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_type'], [
-            'value' => $store_disbursement_type,
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_type'], [
-            'value' => $dm_disbursement_type,
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_type'], [
-            'value' => $ve_disbursement_type,
-        ]);
+        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_type'], ['value' => $store_disbursement_type]);
+        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_type'], ['value' => $dm_disbursement_type]);
+        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_type'], ['value' => $ve_disbursement_type]);
+        Helpers::businessUpdateOrInsert(['key' => 'disbursement_type'], ['value' => $store_disbursement_type]);
 
-        // Keep the legacy single key in sync so nothing else breaks.
-        // We use store_disbursement_type as the authoritative value.
-        Helpers::businessUpdateOrInsert(['key' => 'disbursement_type'], [
-            'value' => $store_disbursement_type,
-        ]);
+        // ── Store settings ─────────────────────────────────────────
+        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_time_period'], ['value' => $request['store_disbursement_time_period']]);
+        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_week_start'], ['value' => $request['store_disbursement_week_start']]);
+        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_waiting_time'], ['value' => $request['store_disbursement_waiting_time']]);
+        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_create_time'], ['value' => $request['store_disbursement_create_time']]);
+        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_min_amount'], ['value' => $request['store_disbursement_min_amount']]);
 
-        // ── Store settings ────────────────────────────────────────────────────────
-        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_time_period'], [
-            'value' => $request['store_disbursement_time_period'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_week_start'], [
-            'value' => $request['store_disbursement_week_start'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_waiting_time'], [
-            'value' => $request['store_disbursement_waiting_time'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_create_time'], [
-            'value' => $request['store_disbursement_create_time'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_min_amount'], [
-            'value' => $request['store_disbursement_min_amount'],
-        ]);
+        // ── Delivery Man settings ──────────────────────────────────
+        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_time_period'], ['value' => $request['dm_disbursement_time_period']]);
+        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_week_start'], ['value' => $request['dm_disbursement_week_start']]);
+        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_waiting_time'], ['value' => $request['dm_disbursement_waiting_time']]);
+        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_create_time'], ['value' => $request['dm_disbursement_create_time']]);
+        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_min_amount'], ['value' => $request['dm_disbursement_min_amount']]);
 
-        // ── Delivery Man settings ─────────────────────────────────────────────────
-        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_time_period'], [
-            'value' => $request['dm_disbursement_time_period'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_week_start'], [
-            'value' => $request['dm_disbursement_week_start'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_waiting_time'], [
-            'value' => $request['dm_disbursement_waiting_time'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_create_time'], [
-            'value' => $request['dm_disbursement_create_time'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_min_amount'], [
-            'value' => $request['dm_disbursement_min_amount'],
-        ]);
+        // ── Vendor Employee settings ───────────────────────────────
+        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_time_period'], ['value' => $request['ve_disbursement_time_period']]);
+        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_week_start'], ['value' => $request['ve_disbursement_week_start']]);
+        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_waiting_time'], ['value' => $request['ve_disbursement_waiting_time']]);
+        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_create_time'], ['value' => $request['ve_disbursement_create_time']]);
+        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_min_amount'], ['value' => $request['ve_disbursement_min_amount']]);
 
-        // ── Vendor Employee settings ──────────────────────────────────────────────
-        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_time_period'], [
-            'value' => $request['ve_disbursement_time_period'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_week_start'], [
-            'value' => $request['ve_disbursement_week_start'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_waiting_time'], [
-            'value' => $request['ve_disbursement_waiting_time'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_create_time'], [
-            'value' => $request['ve_disbursement_create_time'],
-        ]);
-        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_min_amount'], [
-            'value' => $request['ve_disbursement_min_amount'],
-        ]);
+        // ── PHP path ───────────────────────────────────────────────
+        Helpers::businessUpdateOrInsert(['key' => 'system_php_path'], ['value' => $request['system_php_path']]);
 
-        // ── PHP path (only relevant when automated) ───────────────────────────────
-        Helpers::businessUpdateOrInsert(['key' => 'system_php_path'], [
-            'value' => $request['system_php_path'],
-        ]);
+        // ── Generate cron commands for modal display only ──────────
+        // NOTE: exec() removed — crontab is managed via schedule:run
+        // The commands below are for display in the modal only.
+        $data = self::generateCronCommand($store_disbursement_type, $dm_disbursement_type, $ve_disbursement_type);
 
-        // ── Cron command generation ───────────────────────────────────────────────
-        if (function_exists('exec')) {
-            $data = self::generateCronCommand($store_disbursement_type, $dm_disbursement_type, $ve_disbursement_type);
-            $scriptPath = 'script.sh';
-            exec('sh ' . $scriptPath);
+        Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_command'], ['value' => $data['storeCronCommand']]);
+        Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_command'], ['value' => $data['dmCronCommand']]);
+        Helpers::businessUpdateOrInsert(['key' => 've_disbursement_command'], ['value' => $data['veCronCommand']]);
 
-            Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_command'], [
-                'value' => $data['storeCronCommand'],
-            ]);
-            Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_command'], [
-                'value' => $data['dmCronCommand'],
-            ]);
-            Helpers::businessUpdateOrInsert(['key' => 've_disbursement_command'], [
-                'value' => $data['veCronCommand'],
-            ]);
-
-            Toastr::success(translate('messages.successfully_updated_disbursement_functionality'));
-            return back();
-        } else {
-            $data = self::generateCronCommand($store_disbursement_type, $dm_disbursement_type, $ve_disbursement_type);
-
-            Helpers::businessUpdateOrInsert(['key' => 'store_disbursement_command'], [
-                'value' => $data['storeCronCommand'],
-            ]);
-            Helpers::businessUpdateOrInsert(['key' => 'dm_disbursement_command'], [
-                'value' => $data['dmCronCommand'],
-            ]);
-            Helpers::businessUpdateOrInsert(['key' => 've_disbursement_command'], [
-                'value' => $data['veCronCommand'],
-            ]);
-
-            if ($store_disbursement_type == 'automated' || $dm_disbursement_type == 'automated' || $ve_disbursement_type == 'automated') {
-                Session::flash('disbursement_exec', true);
-                Toastr::warning(translate('messages.Servers_PHP_exec_function_is_disabled_check_dependencies_&_start_cron_job_manualy_in_server'));
-            }
-
-            Toastr::success(translate('messages.successfully_updated_disbursement_functionality'));
-            return back();
-        }
+        Toastr::success(translate('messages.successfully_updated_disbursement_functionality'));
+        return back();
     }
+
     private function dmSchedule()
     {
         $key = [
@@ -605,8 +535,7 @@ class BusinessSettingsController extends Controller
         $storeSchedule = self::storeSchedule();
         $veSchedule = self::vendorEmployeeSchedule();
 
-        $scriptFilename = $_SERVER['SCRIPT_FILENAME'];
-        $rootPath = dirname($scriptFilename);
+        $rootPath = base_path();
 
         $dmScriptPath = $rootPath . '/artisan dm:disbursement';
         $storeScriptPath = $rootPath . '/artisan store:disbursement';

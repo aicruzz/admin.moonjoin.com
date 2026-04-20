@@ -8,13 +8,17 @@ use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 
 class Kernel extends ConsoleKernel
 {
-    protected $commands = [
-        //
-    ];
+    protected $commands = [];
 
     protected function schedule(Schedule $schedule)
     {
-        // $schedule->command('inspire')->hourly();
+        // Test — updates DB every minute to confirm cron is running
+        $schedule->call(function () {
+            \App\Models\BusinessSetting::updateOrInsert(
+                ['key' => 'cron_last_run'],
+                ['value' => now(), 'updated_at' => now()]
+            );
+        })->everyMinute();
 
         $schedule->command('store:disbursement')
             ->cron($this->buildCron('store'))
@@ -29,38 +33,37 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping();
     }
 
-    /**
-     * Builds a cron expression from BusinessSetting for a given role prefix.
-     * Mirrors storeSchedule(), dmSchedule(), vendorEmployeeSchedule()
-     * in BusinessSettingsController exactly.
-     */
     private function buildCron(string $prefix): string
     {
-        $settings = array_column(
-            BusinessSetting::whereIn('key', [
-                "{$prefix}_disbursement_time_period",
-                "{$prefix}_disbursement_week_start",
-                "{$prefix}_disbursement_create_time",
-            ])->get()->toArray(),
-            'value',
-            'key'
-        );
+        try {
+            $settings = array_column(
+                BusinessSetting::whereIn('key', [
+                    "{$prefix}_disbursement_time_period",
+                    "{$prefix}_disbursement_week_start",
+                    "{$prefix}_disbursement_create_time",
+                ])->get()->toArray(),
+                'value',
+                'key'
+            );
 
-        $frequency = $settings["{$prefix}_disbursement_time_period"] ?? 'daily';
-        $weekDay = $settings["{$prefix}_disbursement_week_start"] ?? 'sunday';
-        $time = $settings["{$prefix}_disbursement_create_time"] ?? '12:00';
+            $frequency = $settings["{$prefix}_disbursement_time_period"] ?? 'daily';
+            $weekDay = $settings["{$prefix}_disbursement_week_start"] ?? 'sunday';
+            $time = $settings["{$prefix}_disbursement_create_time"] ?? '12:00';
 
-        [$hour, $min] = explode(':', $time);
+            [$hour, $min] = explode(':', $time);
 
-        $days = ['sunday' => 0, 'monday' => 1, 'tuesday' => 2, 'wednesday' => 3, 'thursday' => 4, 'friday' => 5, 'saturday' => 6];
-        $day = $days[$weekDay] ?? 0;
+            $days = ['sunday' => 0, 'monday' => 1, 'tuesday' => 2, 'wednesday' => 3, 'thursday' => 4, 'friday' => 5, 'saturday' => 6];
+            $day = $days[$weekDay] ?? 0;
 
-        return match ($frequency) {
-            'daily' => "{$min} {$hour} * * *",
-            'weekly' => "{$min} {$hour} * * {$day}",
-            'monthly' => "{$min} {$hour} 28-31 * *",
-            default => "{$min} {$hour} * * *",
-        };
+            return match ($frequency) {
+                'daily' => "{$min} {$hour} * * *",
+                'weekly' => "{$min} {$hour} * * {$day}",
+                'monthly' => "{$min} {$hour} 28-31 * *",
+                default => "{$min} {$hour} * * *",
+            };
+        } catch (\Throwable $e) {
+            return '0 12 * * *';
+        }
     }
 
     protected function commands()
