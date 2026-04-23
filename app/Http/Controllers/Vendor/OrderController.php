@@ -866,7 +866,6 @@ class OrderController extends Controller
         return back();
     }
 
-
     public function remove_proof_image(Request $request)
     {
         $order = Order::find($request['id']);
@@ -1178,38 +1177,32 @@ class OrderController extends Controller
         }
 
         foreach ($cart as $c) {
-
             try {
                 if ($c['status'] == true) {
                     if ($c['item_campaign_id'] != null) {
                         $product = ItemCampaign::find($c['item_campaign_id']);
                         if ($product) {
-
                             $price = $c['price'];
-
                             $product = Helpers::product_data_formatting($product);
-
                             $c->item_details = json_encode($product);
                             $c->updated_at = now();
                             if (isset($c->id)) {
-                                OrderDetail::where('id', $c->id)->update(
-                                    [
-                                        'item_id' => $c->item_id,
-                                        'item_campaign_id' => $c->item_campaign_id,
-                                        'item_details' => $c->item_details,
-                                        'quantity' => $c->quantity,
-                                        'price' => $c->price,
-                                        'tax_amount' => $c->tax_amount,
-                                        'discount_on_item' => $c->discount_on_item * $c->quantity,
-                                        'discount_on_product_by' => $request->session()->has('discount_on_product_by_session') ? $request->session()->get('discount_on_product_by_session') : $c?->discount_on_product_by,
-                                        'discount_type' => $c->discount_type,
-                                        'variant' => $c->variant,
-                                        'variation' => $c->variation,
-                                        'add_ons' => $c->add_ons,
-                                        'total_add_on_price' => $c->total_add_on_price,
-                                        'updated_at' => $c->updated_at
-                                    ]
-                                );
+                                OrderDetail::where('id', $c->id)->update([
+                                    'item_id' => $c->item_id,
+                                    'item_campaign_id' => $c->item_campaign_id,
+                                    'item_details' => $c->item_details,
+                                    'quantity' => $c->quantity,
+                                    'price' => $c->price,
+                                    'tax_amount' => $c->tax_amount,
+                                    'discount_on_item' => $c->discount_on_item * $c->quantity,
+                                    'discount_on_product_by' => $request->session()->has('discount_on_product_by_session') ? $request->session()->get('discount_on_product_by_session') : $c?->discount_on_product_by,
+                                    'discount_type' => $c->discount_type,
+                                    'variant' => $c->variant,
+                                    'variation' => $c->variation,
+                                    'add_ons' => $c->add_ons,
+                                    'total_add_on_price' => $c->total_add_on_price,
+                                    'updated_at' => $c->updated_at
+                                ]);
                             } else {
                                 $status = $c['status'];
                                 unset($c['status']);
@@ -1228,32 +1221,27 @@ class OrderController extends Controller
                     } else {
                         $product = Item::find($c['item_id']);
                         if ($product) {
-
                             $price = $c['price'];
-
                             $product = Helpers::product_data_formatting($product);
-
                             $c->item_details = json_encode($product);
                             $c->updated_at = now();
                             if (isset($c->id)) {
-                                OrderDetail::where('id', $c->id)->update(
-                                    [
-                                        'item_id' => $c->item_id,
-                                        'item_campaign_id' => $c->item_campaign_id,
-                                        'item_details' => $c->item_details,
-                                        'quantity' => $c->quantity,
-                                        'price' => $c->price,
-                                        'tax_amount' => $c->tax_amount,
-                                        'discount_on_item' => $c->discount_on_item * $c->quantity,
-                                        'discount_on_product_by' => $request->session()->has('discount_on_product_by_session') ? $request->session()->get('discount_on_product_by_session') : $c?->discount_on_product_by,
-                                        'discount_type' => $c->discount_type,
-                                        'variant' => $c->variant,
-                                        'variation' => $c->variation,
-                                        'add_ons' => $c->add_ons,
-                                        'total_add_on_price' => $c->total_add_on_price,
-                                        'updated_at' => $c->updated_at
-                                    ]
-                                );
+                                OrderDetail::where('id', $c->id)->update([
+                                    'item_id' => $c->item_id,
+                                    'item_campaign_id' => $c->item_campaign_id,
+                                    'item_details' => $c->item_details,
+                                    'quantity' => $c->quantity,
+                                    'price' => $c->price,
+                                    'tax_amount' => $c->tax_amount,
+                                    'discount_on_item' => $c->discount_on_item * $c->quantity,
+                                    'discount_on_product_by' => $request->session()->has('discount_on_product_by_session') ? $request->session()->get('discount_on_product_by_session') : $c?->discount_on_product_by,
+                                    'discount_type' => $c->discount_type,
+                                    'variant' => $c->variant,
+                                    'variation' => $c->variation,
+                                    'add_ons' => $c->add_ons,
+                                    'total_add_on_price' => $c->total_add_on_price,
+                                    'updated_at' => $c->updated_at
+                                ]);
                             } else {
                                 $status = $c['status'];
                                 $item = isset($c['item']) ? $c['item'] : null;
@@ -1263,12 +1251,10 @@ class OrderController extends Controller
                                 unset($c['item_campaign']);
                                 $c->save();
                                 $c['status'] = $status;
-                                if ($item) {
+                                if ($item)
                                     $c['item'] = $item;
-                                }
-                                if ($campaign) {
+                                if ($campaign)
                                     $c['item_campaign'] = $campaign;
-                                }
                             }
                             $order_details_ids[] = $c->id;
                             $total_addon_price += $c['total_add_on_price'];
@@ -1293,11 +1279,11 @@ class OrderController extends Controller
             if ($product_price + $total_addon_price < $store_discount['min_purchase']) {
                 $store_discount_amount = 0;
             }
-
             if ($store_discount_amount > $store_discount['max_discount'] && $store_discount_amount > $store_discount['max_discount']) {
                 $store_discount_amount = $store_discount['max_discount'];
             }
         }
+
         $order->delivery_charge = $order->original_delivery_charge;
         if ($coupon) {
             if ($coupon->coupon_type == 'free_delivery') {
@@ -1321,15 +1307,30 @@ class OrderController extends Controller
         $additional_charge = $settings['additional_charge'] ?? null;
 
         $order->additional_charge = 0;
-
         if ($additional_charge_status == 1) {
             $order->additional_charge = $additional_charge ?? 0;
-            // $additionalCharges['tax_on_additional_charge'] = $order->additional_charge;
         }
-        $order_details = $this->makeEditOrderDetails($cart, null, $store);
 
-        foreach ($order_details['order_details'] as $key => $order_de) {
+        $order_details_result = $this->makeEditOrderDetails($cart, null, $store);
 
+        // ✅ FIX 1: Check for error response BEFORE accessing order_details
+        if (data_get($order_details_result, 'status_code') === 403) {
+            DB::rollBack();
+            return response()->json([
+                'errors' => [
+                    ['code' => data_get($order_details_result, 'code'), 'message' => data_get($order_details_result, 'message')]
+                ]
+            ], 403);
+        }
+
+        // ✅ FIX 2: Guard against missing order_details key before iterating
+        if (!isset($order_details_result['order_details'])) {
+            DB::rollBack();
+            Toastr::error(translate('messages.order_data_not_found'));
+            return back();
+        }
+
+        foreach ($order_details_result['order_details'] as $key => $order_de) {
             $order->details()->where('id', $order_de['cart_id'])->update([
                 'discount_on_item' => $order_de['discount_on_item'],
                 'discount_on_product_by' => $order_de['discount_on_product_by'],
@@ -1337,26 +1338,17 @@ class OrderController extends Controller
             ]);
         }
 
+        $total_addon_price = $order_details_result['total_addon_price'];
+        $product_price = $order_details_result['product_price'];
+        $store_discount_amount = $order_details_result['store_discount_amount'];
+        $flash_sale_admin_discount_amount = $order_details_result['flash_sale_admin_discount_amount'];
+        $flash_sale_vendor_discount_amount = $order_details_result['flash_sale_vendor_discount_amount'];
+        $product_data = $order_details_result['product_data'];
+        $order_details = $order_details_result['order_details'];
 
-        if (data_get($order_details, 'status_code') === 403) {
-            DB::rollBack();
-            return response()->json([
-                'errors' => [
-                    ['code' => data_get($order_details, 'code'), 'message' => data_get($order_details, 'message')]
-                ]
-            ], data_get($order_details, 'status_code'));
-        }
-        $total_addon_price = $order_details['total_addon_price'];
-        $product_price = $order_details['product_price'];
-        $store_discount_amount = $order_details['store_discount_amount'];
-        $flash_sale_admin_discount_amount = $order_details['flash_sale_admin_discount_amount'];
-        $flash_sale_vendor_discount_amount = $order_details['flash_sale_vendor_discount_amount'];
-        $product_data = $order_details['product_data'];
-        $order_details = $order_details['order_details'];
         $coupon_discount_amount = $coupon ? CouponLogic::get_discount($coupon, $product_price + $total_addon_price - $store_discount_amount) : 0;
         $total_price = $product_price + $total_addon_price - $store_discount_amount - $flash_sale_admin_discount_amount - $flash_sale_vendor_discount_amount - $coupon_discount_amount;
         $totalDiscount = $store_discount_amount + $flash_sale_admin_discount_amount + $flash_sale_vendor_discount_amount + $coupon_discount_amount + $order->ref_bonus_amount;
-
 
         $finalCalculatedTax = Helpers::getFinalCalculatedTax($order_details, $additionalCharges, $totalDiscount, $total_price, $store->id);
         $tax_amount = $finalCalculatedTax['tax_amount'];
@@ -1365,14 +1357,12 @@ class OrderController extends Controller
         $taxMap = $finalCalculatedTax['taxMap'];
         $orderTaxIds = data_get($finalCalculatedTax, 'taxData.orderTaxIds', []);
         $taxType = data_get($finalCalculatedTax, 'taxType');
+
         $order->tax_type = $taxType;
         $order->tax_status = $tax_status;
 
         $total_tax_amount = $tax_amount;
-
         $total_tax_amount = $order->tax_status == 'included' ? 0 : $total_tax_amount;
-
-
 
         if ($store->minimum_order > $product_price + $total_addon_price) {
             DB::rollBack();
@@ -1386,7 +1376,6 @@ class OrderController extends Controller
                 $order->delivery_charge = 0;
             }
         }
-
 
         $total_order_ammount = $total_price + $total_tax_amount + $order->delivery_charge + $order->additional_charge;
 
@@ -1403,7 +1392,6 @@ class OrderController extends Controller
                 ];
                 if ($order->customer->cm_firebase_token) {
                     Helpers::send_push_notif_to_device($order->customer->cm_firebase_token, $notification_data);
-
                     DB::table('user_notifications')->insert([
                         'data' => json_encode($notification_data),
                         'user_id' => $order->user_id,
@@ -1417,7 +1405,6 @@ class OrderController extends Controller
         }
 
         $old_order_amount = $order->order_amount;
-
         $adjustment = $order->order_amount - $total_order_ammount;
         $order->coupon_discount_amount = $coupon_discount_amount;
         $order->store_discount_amount = $store_discount_amount;
@@ -1434,10 +1421,10 @@ class OrderController extends Controller
             } else if ($difference < 0) {
                 \App\CentralLogics\CustomerLogic::create_wallet_transaction($order->user_id, abs($difference), 'order_refund', 'Order edited (amount decreased) for order ID: ' . $order->id);
             }
-
-            // Notify customer about wallet change
             $type = $difference > 0 ? 'debit' : 'credit';
-            $reason = $difference > 0 ? 'Order edited (amount increased) for order #' . $order->id : 'Order edited (amount decreased) for order #' . $order->id;
+            $reason = $difference > 0
+                ? 'Order edited (amount increased) for order #' . $order->id
+                : 'Order edited (amount decreased) for order #' . $order->id;
             $this->sendOrderWalletChangeNotification($order->user_id, $type, abs($difference), $reason, $order->id);
         }
 
@@ -1445,15 +1432,8 @@ class OrderController extends Controller
             $taxMapCollection = collect($taxMap);
             foreach ($order_details as $key => $item) {
                 $order_details[$key]['order_id'] = $order->id;
-
-                if ($item['item_id']) {
-                    $item_id = $item['item_id'];
-                } else {
-                    $item_id = $item['item_campaign_id'];
-                }
-                $index = $taxMapCollection->search(function ($tax) use ($item_id) {
-                    return $tax['product_id'] == $item_id;
-                });
+                $item_id = $item['item_id'] ?: $item['item_campaign_id'];
+                $index = $taxMapCollection->search(fn($tax) => $tax['product_id'] == $item_id);
                 if ($index !== false) {
                     $matchedTax = $taxMapCollection->pull($index);
                     $order_details[$key]['tax_status'] = $matchedTax['include'] == 1 ? 'included' : 'excluded';
@@ -1555,7 +1535,6 @@ class OrderController extends Controller
     public function markUnavailableItems(Request $request, $id)
     {
         $order = Order::where(['id' => $id, 'store_id' => Helpers::get_store_id()])->first();
-
         if (!$order) {
             Toastr::error(translate('messages.Order_not_found'));
             return back();
@@ -1577,17 +1556,19 @@ class OrderController extends Controller
         $order->customer_edit_requested = 1;
         $order->save();
 
-        // Build notification payload
+        // Build notification payload matching send_push_notif_to_device expectations
         $unavailableCount = count($request->unavailable_item_ids);
-        $message = 'Order #' . $order->id . ' has ' . $unavailableCount
-            . ' unavailable item(s). Please edit your order to proceed.';
-
         $notification_data = [
-            'title' => 'Order #' . $order->id . ' - Unavailable Items',
-            'description' => $message,
+            'title' => translate('messages.order_unavailable_items'),
+            'description' => translate('messages.you_have') . ' ' . $unavailableCount
+                . ' ' . translate('messages.unavailable_items_in_order')
+                . ' #' . $order->id
+                . '. ' . translate('messages.please_edit_your_order'),
             'order_id' => (string) $order->id,
             'image' => '',
             'type' => 'order_unavailable_items',
+            'order_type' => $order->order_type ?? '',
+            'status' => $order->order_status,
         ];
 
         // Send push notification to customer
@@ -1602,14 +1583,12 @@ class OrderController extends Controller
             }
         }
 
-        // Store in-app notification (same pattern as rest of controller)
+        // Store in-app notification
         try {
-            DB::table('user_notifications')->insert([
-                'data' => json_encode($notification_data),
-                'user_id' => $order->user_id,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            $notification = new \App\Models\Notification();  // adjust namespace to match your project
+            $notification->data = json_encode($notification_data);
+            $notification->user_id = $order->user_id;
+            $notification->save();
         } catch (\Exception $e) {
             info('Unavailable items in-app notification failed: ' . $e->getMessage());
         }

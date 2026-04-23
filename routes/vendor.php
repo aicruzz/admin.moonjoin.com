@@ -268,7 +268,6 @@ Route::group(['namespace' => 'Vendor', 'as' => 'vendor.'], function () {
             Route::get('export-orders/{file_type}/{status}/{type}', 'OrderController@export_orders')->name('export');
 
             Route::post('{id}/mark-unavailable', 'OrderController@markUnavailableItems')->name('mark-unavailable');
-
         });
 
         Route::group(['prefix' => 'business-settings', 'as' => 'business-settings.'], function () {

@@ -543,7 +543,7 @@ Route::group(['namespace' => 'Api\V1', 'middleware' => 'localization'], function
                             Route::post('parcel-return', 'OrderController@parcelReturn');
                             Route::post('wallet-payment', 'OrderController@walletPayment');
                             Route::get('payment-failed', 'CustomerController@orderPaymentFailed');
-
+                            Route::put('update/{order}', 'OrderController@update');
                         }
                     );
 
