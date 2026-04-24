@@ -398,9 +398,9 @@
                                             if (!$editing) {
                                                 $detail->item = json_decode($detail->item_details, true);
                                             }
-                                            $product = \App\Models\Item::where(['id' => data_get($detail->item,'id')])->first();
-                                            if(!$product){
-                                                $detail->item = json_decode($detail->item_details, true);
+                                            $product = \App\Models\Item::where(['id' => data_get($detail->item,'id') ?? $detail->item_id])->first();
+                                            if (!$detail->item) {
+                                                $detail->item = $product ? \App\CentralLogics\Helpers::product_data_formatting($product, false) : null;
                                             }
                                             ?>
                                             <!-- Media -->
@@ -425,9 +425,9 @@
                                                             </div>
                                                         @else
                                                             <a class="avatar avatar-xl mr-3"
-                                                                href="{{ route('vendor.item.view', $detail->item['id']) }}">
+                                                                href="{{ $detail->item ? route('vendor.item.view', $detail->item['id']) : '#' }}">
                                                                 <img class="img-fluid rounded onerror-image"
-                                                                src="{{ $product->image_full_url  ?? asset('public/assets/admin/img/160x160/img2.jpg') }}"
+                                                                src="{{ $product?->image_full_url ?? asset('public/assets/admin/img/160x160/img2.jpg') }}"
                                                                      data-onerror-image="{{ asset('public/assets/admin/img/160x160/img2.jpg') }}"
                                                                     alt="Image Description">
                                                             </a>
@@ -435,7 +435,7 @@
                                                         <div class="media-body">
                                                             <div>
                                                                 <strong
-                                                                    class="line--limit-1">{{ Str::limit($detail->item['name'], 25, '...') }}</strong>
+                                                                    class="line--limit-1">{{ Str::limit($detail->item['name'] ?? 'Unknown Item', 25, '...') }}</strong>
                                                                 <h6>
                                                                     {{ $detail['quantity'] }} x
                                                                     {{ \App\CentralLogics\Helpers::format_currency($detail['price']) }}
@@ -450,11 +450,13 @@
                                                                                     </strong>
                                                                                 </span>
                                                                                 @foreach ($variation['values'] as $value)
+                                                                                    @if (is_array($value) && isset($value['label']))
                                                                                     <span class="d-block text-capitalize">
                                                                                         &nbsp; &nbsp;
                                                                                         {{ $value['label'] }} :
-                                                                                        <strong>{{ \App\CentralLogics\Helpers::format_currency($value['optionPrice']) }}</strong>
+                                                                                        <strong>{{ \App\CentralLogics\Helpers::format_currency($value['optionPrice'] ?? 0) }}</strong>
                                                                                     </span>
+                                                                                    @endif
                                                                                 @endforeach
                                                                             @else
                                                                                 @if (isset(json_decode($detail['variation'], true)[0]))

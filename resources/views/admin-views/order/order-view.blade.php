@@ -471,11 +471,10 @@
                                                 if (!$editing) {
                                                     $detail->item = json_decode($detail->item_details, true);
                                                 }
-                                                $product = \App\Models\Item::where(['id' => data_get($detail->item,'id')])->first();
-                                                        if(!$product){
-                                                            $detail->item = json_decode($detail->item_details, true);
-                                                        }
-
+                                                $product = \App\Models\Item::where(['id' => data_get($detail->item,'id') ?? $detail->item_id])->first();
+                                                if (!$detail->item) {
+                                                    $detail->item = $product ? \App\CentralLogics\Helpers::product_data_formatting($product, false) : null;
+                                                }
                                                 ?>
 
                                             <tr>
@@ -501,7 +500,7 @@
                                                             </div>
                                                         @else
                                                             <a class="avatar avatar-lg mr-3"
-                                                               href="{{ route('admin.item.view', [$detail->item['id'],'module_id' => $order->module_id]) }}">
+                                                               href="{{ $detail->item ? route('admin.item.view', [$detail->item['id'],'module_id' => $order->module_id]) : '#' }}">
                                                                 <img class="img-fluid rounded aspect-ratio-1 onerror-image"
                                                                      src="{{ $product?->image_full_url ?? asset('public/assets/admin/img/100x100/2.png') }}"
                                                                      data-onerror-image="{{ asset('public/assets/admin/img/100x100/2.png') }}"
@@ -511,7 +510,7 @@
                                                         <div class="media-body">
                                                             <div>
                                                                 <strong class="line--limit-1 card-text font-medium">
-                                                                    {{ $detail->item['name'] }}</strong>
+                                                                    {{ $detail->item['name'] ?? 'Unknown Item' }}</strong>
                                                                 <h6 class="card-text font-regular">
                                                                     {{ $detail['quantity'] }} x
                                                                     {{ \App\CentralLogics\Helpers::format_currency($detail['price']) }}
@@ -526,12 +525,14 @@
                                                                                         </strong>
                                                                                     </span>
                                                                                 @foreach ($variation['values'] as $value)
+                                                                                    @if (is_array($value) && isset($value['label']))
                                                                                     <span
                                                                                         class="d-block text-capitalize">
                                                                                             &nbsp; &nbsp;
                                                                                             {{ $value['label'] }} :
-                                                                                            <strong>{{ \App\CentralLogics\Helpers::format_currency($value['optionPrice']) }}</strong>
+                                                                                            <strong>{{ \App\CentralLogics\Helpers::format_currency($value['optionPrice'] ?? 0) }}</strong>
                                                                                         </span>
+                                                                                    @endif
                                                                                 @endforeach
                                                                             @else
                                                                                 @if (isset(json_decode($detail['variation'], true)[0]))
@@ -682,12 +683,14 @@
                                                                                         </strong>
                                                                                     </span>
                                                                                 @foreach ($variation['values'] as $value)
+                                                                                    @if (is_array($value) && isset($value['label']))
                                                                                     <span
                                                                                         class="d-block text-capitalize">
                                                                                             &nbsp; &nbsp;
                                                                                             {{ $value['label'] }} :
-                                                                                            <strong>{{ \App\CentralLogics\Helpers::format_currency($value['optionPrice']) }}</strong>
+                                                                                            <strong>{{ \App\CentralLogics\Helpers::format_currency($value['optionPrice'] ?? 0) }}</strong>
                                                                                         </span>
+                                                                                    @endif
                                                                                 @endforeach
                                                                             @else
                                                                                 @if (isset(json_decode($detail['variation'], true)[0]))

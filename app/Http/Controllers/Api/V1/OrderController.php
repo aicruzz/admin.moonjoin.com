@@ -841,9 +841,14 @@ class OrderController extends Controller
 
                 $variation_encoded = null;
                 if (!empty($c['variation'])) {
-                    $variation_encoded = is_array($c['variation'])
-                        ? json_encode($c['variation'])
-                        : $c['variation'];
+                    $variationInput = is_array($c['variation']) ? $c['variation'] : json_decode($c['variation'], true);
+                    $product_variations = json_decode($product->food_variations ?? 'null', true);
+                    if ($product_variations && count($product_variations)) {
+                        $variation_data = Helpers::get_edit_varient($product_variations, $variationInput);
+                        $variation_encoded = json_encode($variation_data['variations']);
+                    } else {
+                        $variation_encoded = json_encode($variationInput);
+                    }
                 }
                 $add_ons_encoded = null;
                 if (!empty($c['add_on_ids'])) {
