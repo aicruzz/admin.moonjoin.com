@@ -770,26 +770,29 @@ class OrderController extends Controller
 
     public function update(Request $request, Order $order)
     {
-        // Ensure order belongs to authenticated customer
         if ($order->user_id !== auth()->id()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        // Only allow update on pending/confirmed orders
         if (!in_array($order->order_status, ['pending', 'confirmed'])) {
             return response()->json(['message' => 'Order cannot be updated at this stage'], 400);
         }
 
         $validator = Validator::make($request->all(), [
             'cart' => 'required|array|min:1',
+            'cart.*.id' => 'nullable|integer',
             'cart.*.item_id' => 'nullable|integer',
             'cart.*.item_campaign_id' => 'nullable|integer',
             'cart.*.quantity' => 'required|integer|min:1',
             'cart.*.price' => 'required|numeric|min:0',
             'cart.*.variant' => 'nullable|string',
-            'cart.*.variation' => 'nullable|string',
-            'cart.*.add_ons' => 'nullable|string',
+            'cart.*.variation' => 'nullable',
+            'cart.*.add_ons' => 'nullable',
+            'cart.*.add_on_ids' => 'nullable|array',
+            'cart.*.add_on_qtys' => 'nullable|array',
             'cart.*.total_add_on_price' => 'nullable|numeric',
+            'cart.*.tax_amount' => 'nullable|numeric',
+            'cart.*.discount_on_item' => 'nullable|numeric',
         ]);
 
         if ($validator->fails()) {
@@ -798,108 +801,134 @@ class OrderController extends Controller
 
         DB::beginTransaction();
         try {
-            $store = $order->store;
             $total_addon_price = 0;
             $product_price = 0;
             $store_discount_amount = 0;
-            $order_details_ids = [];
 
-            // Delete items not in new cart
-            $incoming_ids = collect($request->cart)->pluck('id')->filter()->toArray();
+
+            $incoming_ids = collect($request->cart)
+                ->pluck('id')
+                ->filter(fn($id) => is_int($id) && $id > 0)
+                ->values()
+                ->toArray();
+
             $order->details()->whereNotIn('id', $incoming_ids)->delete();
 
             foreach ($request->cart as $c) {
-                $price = $c['price'];
 
-                if (!empty($c['item_campaign_id'])) {
-                    $product = ItemCampaign::find($c['item_campaign_id']);
-                } else {
-                    $product = Item::find($c['item_id']);
-                }
+                $product = !empty($c['item_campaign_id'])
+                    ? ItemCampaign::find($c['item_campaign_id'])
+                    : Item::find($c['item_id']);
 
                 if (!$product) {
                     DB::rollBack();
-                    return response()->json(['message' => 'Item not found'], 404);
+                    return response()->json([
+                        'message' => 'Item not found',
+                        'item_id' => $c['item_id'] ?? null,
+                        'item_campaign_id' => $c['item_campaign_id'] ?? null,
+                    ], 404);
                 }
 
-                $product = Helpers::product_data_formatting($product);
-                $item_details = json_encode($product);
+                $formatted = Helpers::product_data_formatting($product);
+                $item_details = is_string($formatted) ? $formatted : json_encode($formatted);
 
-                $discount_on_item = isset($c['discount_on_item']) ? $c['discount_on_item'] : 0;
+                $discount_per_unit = (float) ($c['discount_on_item'] ?? 0);
+                $qty = (int) $c['quantity'];
+                $discount_total = $discount_per_unit * $qty;
 
-                // Update existing detail or create new
+                $variation_encoded = null;
+                if (!empty($c['variation'])) {
+                    $variation_encoded = is_array($c['variation'])
+                        ? json_encode($c['variation'])
+                        : $c['variation'];
+                }
+                $add_ons_encoded = null;
+                if (!empty($c['add_on_ids'])) {
+                    $ids = $c['add_on_ids'];
+                    $qtys = $c['add_on_qtys'] ?? array_fill(0, count($ids), 1);
+                    $add_ons_encoded = json_encode(
+                        array_map(
+                            fn($id, $qty) => ['id' => (int) $id, 'quantity' => (int) $qty],
+                            $ids,
+                            $qtys
+                        )
+                    );
+                } elseif (!empty($c['add_ons'])) {
+                    $add_ons_encoded = is_array($c['add_ons'])
+                        ? json_encode($c['add_ons'])
+                        : $c['add_ons'];
+                }
+
+                $detail_data = [
+                    'item_id' => $c['item_id'] ?? null,
+                    'item_campaign_id' => $c['item_campaign_id'] ?? null,
+                    'item_details' => $item_details,
+                    'quantity' => $qty,
+                    'price' => (float) $c['price'],
+                    'tax_amount' => (float) ($c['tax_amount'] ?? 0),
+                    'discount_on_item' => $discount_total,
+                    'variant' => $c['variant'] ?? null,
+                    'variation' => $variation_encoded,
+                    'add_ons' => $add_ons_encoded,
+                    'total_add_on_price' => (float) ($c['total_add_on_price'] ?? 0),
+                ];
+
                 if (!empty($c['id'])) {
-                    OrderDetail::where('id', $c['id'])->update([
-                        'item_id' => $c['item_id'] ?? null,
-                        'item_campaign_id' => $c['item_campaign_id'] ?? null,
-                        'item_details' => $item_details,
-                        'quantity' => $c['quantity'],
-                        'price' => $c['price'],
-                        'tax_amount' => $c['tax_amount'] ?? 0,
-                        'discount_on_item' => $discount_on_item * $c['quantity'],
-                        'variant' => $c['variant'] ?? null,
-                        'variation' => $c['variation'] ?? null,
-                        'add_ons' => $c['add_ons'] ?? null,
-                        'total_add_on_price' => $c['total_add_on_price'] ?? 0,
-                        'updated_at' => now(),
-                    ]);
-                    $order_details_ids[] = $c['id'];
+                    $detail = OrderDetail::findOrFail($c['id']);
+                    $detail->fill($detail_data)->save();
                 } else {
-                    // New item being added
-                    $detail = $order->details()->create([
-                        'item_id' => $c['item_id'] ?? null,
-                        'item_campaign_id' => $c['item_campaign_id'] ?? null,
-                        'item_details' => $item_details,
-                        'quantity' => $c['quantity'],
-                        'price' => $c['price'],
-                        'tax_amount' => $c['tax_amount'] ?? 0,
-                        'discount_on_item' => $discount_on_item * $c['quantity'],
-                        'variant' => $c['variant'] ?? null,
-                        'variation' => $c['variation'] ?? null,
-                        'add_ons' => $c['add_ons'] ?? null,
-                        'total_add_on_price' => $c['total_add_on_price'] ?? 0,
-                    ]);
-                    $order_details_ids[] = $detail->id;
+                    $order->details()->create($detail_data);
                 }
 
-                $total_addon_price += $c['total_add_on_price'] ?? 0;
-                $product_price += $price * $c['quantity'];
-                $store_discount_amount += $discount_on_item * $c['quantity'];
+                $total_addon_price += (float) ($c['total_add_on_price'] ?? 0);
+                $product_price += (float) $c['price'] * $qty;
+                $store_discount_amount += $discount_total;
             }
 
-            // Recalculate order total
+            // ── Recalculate totals ────────────────────────────────────────────
+            $subtotal_before_coupon = $product_price + $total_addon_price - $store_discount_amount;
+
             $coupon = $order->coupon_code
                 ? Coupon::where('code', $order->coupon_code)->first()
                 : null;
 
             $coupon_discount_amount = $coupon
-                ? CouponLogic::get_discount($coupon, $product_price + $total_addon_price - $store_discount_amount)
+                ? (float) CouponLogic::get_discount($coupon, $subtotal_before_coupon)
                 : 0;
 
-            $total_price = $product_price + $total_addon_price
-                - $store_discount_amount
-                - $coupon_discount_amount;
+            $total_order_amount =
+                $subtotal_before_coupon
+                - $coupon_discount_amount
+                + (float) $order->total_tax_amount
+                + (float) $order->delivery_charge
+                + (float) ($order->additional_charge ?? 0);
 
-            $total_order_amount = $total_price + $order->total_tax_amount
-                + $order->delivery_charge
-                + $order->additional_charge;
-
-            $old_order_amount = $order->order_amount;
+            $old_order_amount = (float) $order->order_amount;
 
             $order->coupon_discount_amount = $coupon_discount_amount;
             $order->store_discount_amount = $store_discount_amount;
+            $order->adjusment = $total_order_amount - $old_order_amount;
             $order->order_amount = $total_order_amount;
-            $order->adjusment = $order->order_amount - $total_order_amount;
             $order->edited = true;
             $order->save();
 
-            // Handle wallet adjustment if paid by wallet
-            $difference = $order->order_amount - $old_order_amount;
-            if ($difference != 0 && ($order->payment_method == 'wallet' || $order->payment_status == 'paid')) {
+            $difference = $total_order_amount - $old_order_amount;
+
+            if ($difference != 0 && in_array($order->payment_method, ['wallet']) || $order->payment_status === 'paid') {
                 if ($difference > 0) {
-                    CustomerLogic::create_wallet_transaction($order->user_id, $difference, 'order_place', 'Order edited (amount increased) for order ID: ' . $order->id);
+                    CustomerLogic::create_wallet_transaction(
+                        $order->user_id,
+                        $difference,
+                        'order_place',
+                        'Order edited (amount increased) for order ID: ' . $order->id
+                    );
                 } else {
-                    CustomerLogic::create_wallet_transaction($order->user_id, abs($difference), 'order_refund', 'Order edited (amount decreased) for order ID: ' . $order->id);
+                    CustomerLogic::create_wallet_transaction(
+                        $order->user_id,
+                        abs($difference),
+                        'order_refund',
+                        'Order edited (amount decreased) for order ID: ' . $order->id
+                    );
                 }
             }
 
@@ -912,7 +941,13 @@ class OrderController extends Controller
 
         } catch (\Throwable $th) {
             DB::rollBack();
-            return response()->json(['message' => $th->getMessage()], 500);
+
+            return response()->json([
+                'message' => $th->getMessage(),
+                'file' => $th->getFile(),
+                'line' => $th->getLine(),
+                'trace' => config('app.debug') ? $th->getTraceAsString() : 'enable APP_DEBUG to see trace',
+            ], 500);
         }
     }
 }
