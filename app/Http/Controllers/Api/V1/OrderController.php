@@ -770,7 +770,8 @@ class OrderController extends Controller
 
     public function update(Request $request, Order $order)
     {
-        if ($order->user_id !== auth()->id()) {
+        $userId = $request->user ? $request->user->id : null;
+        if ($order->user_id !== $userId) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
