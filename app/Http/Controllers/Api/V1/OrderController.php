@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\CentralLogics\CustomerLogic;
 use App\Models\Admin;
 use App\Models\Order;
+use App\Models\AddOn;
 use App\Models\Item;
 use App\Models\OrderDetail;
 use App\Models\Store;
@@ -848,13 +849,11 @@ class OrderController extends Controller
                 if (!empty($c['add_on_ids'])) {
                     $ids = $c['add_on_ids'];
                     $qtys = $c['add_on_qtys'] ?? array_fill(0, count($ids), 1);
-                    $add_ons_encoded = json_encode(
-                        array_map(
-                            fn($id, $qty) => ['id' => (int) $id, 'quantity' => (int) $qty],
-                            $ids,
-                            $qtys
-                        )
+                    $addon_data = Helpers::calculate_addon_price(
+                        AddOn::whereIn('id', $ids)->get(),
+                        $qtys
                     );
+                    $add_ons_encoded = $addon_data ? json_encode($addon_data['addons']) : null;
                 } elseif (!empty($c['add_ons'])) {
                     $add_ons_encoded = is_array($c['add_ons'])
                         ? json_encode($c['add_ons'])

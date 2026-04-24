@@ -581,7 +581,7 @@
                                                 @if ($order->store && $order->store->module->module_type == 'food')
                                                     <td>
                                                         <div>
-                                                            @foreach (json_decode($detail['add_ons'], true) as $key2 => $addon)
+                                                            @foreach (json_decode($detail['add_ons'], true) ?? [] as $key2 => $addon)
                                                                 @if ($key2 == 0)
                                                                     <strong><u>{{ translate('messages.addons') }} :
                                                                         </u></strong>
@@ -731,7 +731,7 @@
                                                 @if ($order->store && $order->store->module->module_type == 'food')
                                                     <td>
                                                         <div>
-                                                            @foreach (json_decode($detail['add_ons'], true) as $key2 => $addon)
+                                                            @foreach (json_decode($detail['add_ons'], true) ?? [] as $key2 => $addon)
                                                                 @if ($key2 == 0)
                                                                     <strong><u>{{ translate('messages.addons') }} :
                                                                         </u></strong>
