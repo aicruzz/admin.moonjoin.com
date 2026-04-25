@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Models\Item;
+use App\Models\VendorEmployee;
+use App\Models\EmployeeWalletTransaction;
 use App\Models\Zone;
 use App\Models\AddOn;
 use App\Models\Order;
@@ -925,6 +927,85 @@ class VendorController extends Controller
 
         $store->save();
         Toastr::success(translate('messages.store_settings_updated'));
+        return back();
+    }
+
+    public function updateEmployeeEarning(Store $store, Request $request)
+    {
+        $request->validate([
+            'employee_earning_type' => 'required|in:none,fixed,percentage',
+            'employee_earning_fixed_amount' => 'nullable|numeric|min:0',
+            'employee_earning_percentage' => 'nullable|numeric|min:0|max:100',
+            'employee_earning_cap' => 'nullable|numeric|min:0',
+        ]);
+
+        $store->employee_earning_type = $request->employee_earning_type;
+        $store->employee_earning_fixed_amount = $request->employee_earning_type == 'fixed'
+            ? $request->employee_earning_fixed_amount
+            : null;
+        $store->employee_earning_percentage = $request->employee_earning_type == 'percentage'
+            ? $request->employee_earning_percentage
+            : null;
+        $store->employee_earning_cap = $request->employee_earning_type == 'percentage'
+            ? $request->employee_earning_cap
+            : null;
+        $store->save();
+
+        Toastr::success(translate('Employee earnings setup updated successfully'));
+        return back();
+    }
+
+    public function adminCreditEmployeeWallet(Store $store, VendorEmployee $employee, Request $request)
+    {
+        $request->validate([
+            'amount' => 'required|numeric|min:0.01',
+            'note' => 'nullable|string|max:300',
+        ]);
+
+        if ($employee->store_id !== $store->id) {
+            Toastr::error(translate('Employee does not belong to this store'));
+            return back();
+        }
+
+        $employee->increment('wallet_balance', $request->amount);
+
+        EmployeeWalletTransaction::create([
+            'employee_id' => $employee->id,
+            'store_id' => $store->id,
+            'amount' => $request->amount,
+            'type' => 'credit',
+            'status' => 'approved',
+            'reason' => 'Admin credit',
+            'note' => $request->note,
+        ]);
+
+        Toastr::success(translate('Employee wallet credited successfully'));
+        return back();
+    }
+
+    public function adminPayoutEmployeeWallet(Store $store, EmployeeWalletTransaction $transaction, Request $request)
+    {
+        if ($transaction->type !== 'withdraw' || $transaction->status !== 'pending') {
+            Toastr::error(translate('Invalid payout request'));
+            return back();
+        }
+
+        $employee = VendorEmployee::find($transaction->employee_id);
+        if (!$employee || $employee->store_id !== $store->id) {
+            Toastr::error(translate('Employee does not belong to this store'));
+            return back();
+        }
+
+        if ($employee->wallet_balance < $transaction->amount) {
+            Toastr::error(translate('Insufficient employee wallet balance'));
+            return back();
+        }
+
+        $employee->decrement('wallet_balance', $transaction->amount);
+        $transaction->status = 'approved';
+        $transaction->save();
+
+        Toastr::success(translate('Payout approved successfully'));
         return back();
     }
 

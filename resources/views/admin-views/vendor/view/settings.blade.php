@@ -349,6 +349,108 @@
                     </div>
                 </div>
             </div>
+            {{-- ===== Employee Earnings Setup ===== --}}
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="card-title">
+                        <span class="card-header-icon"><i class="tio-wallet-outlined"></i></span>
+                        <span class="p-md-1">{{ translate('Employee Earnings Setup') }}</span>
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ route('admin.store.update-employee-earning', $store->id) }}" method="POST" id="employee-earning-form">
+                        @csrf
+                        @php($earningType = $store->employee_earning_type ?? 'none')
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="input-label text-capitalize d-block mb-2">
+                                    {{ translate('Earning Type') }}
+                                    <span class="input-label-secondary" data-toggle="tooltip" data-placement="right"
+                                          data-original-title="{{ translate('Set how vendor employees earn from orders completed at this store.') }}">
+                                        <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
+                                    </span>
+                                </label>
+                                <div class="restaurant-type-group border">
+                                    <label class="form-check form--check mr-2 mr-md-4">
+                                        <input class="form-check-input" type="radio" name="employee_earning_type"
+                                               id="earning_type_none" value="none"
+                                            {{ $earningType == 'none' ? 'checked' : '' }}>
+                                        <span class="form-check-label">{{ translate('None') }}</span>
+                                    </label>
+                                    <label class="form-check form--check mr-2 mr-md-4">
+                                        <input class="form-check-input" type="radio" name="employee_earning_type"
+                                               id="earning_type_fixed" value="fixed"
+                                            {{ $earningType == 'fixed' ? 'checked' : '' }}>
+                                        <span class="form-check-label">{{ translate('Fixed Amount') }}</span>
+                                    </label>
+                                    <label class="form-check form--check mr-2 mr-md-4">
+                                        <input class="form-check-input" type="radio" name="employee_earning_type"
+                                               id="earning_type_percentage" value="percentage"
+                                            {{ $earningType == 'percentage' ? 'checked' : '' }}>
+                                        <span class="form-check-label">{{ translate('Percentage (with Cap)') }}</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {{-- Fixed amount field --}}
+                            <div class="col-sm-6 earning-fixed-section {{ $earningType != 'fixed' ? 'd-none' : '' }}">
+                                <div class="form-group">
+                                    <label class="input-label text-capitalize" for="employee_earning_fixed_amount">
+                                        {{ translate('Fixed Amount Per Order') }}
+                                        <span class="input-label-secondary" data-toggle="tooltip" data-placement="right"
+                                              data-original-title="{{ translate('A flat amount credited to the employee wallet for each completed order.') }}">
+                                            <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
+                                        </span>
+                                    </label>
+                                    <input id="employee_earning_fixed_amount" type="number" step="0.01" min="0"
+                                           class="form-control h--45px" name="employee_earning_fixed_amount"
+                                           placeholder="{{ translate('e.g. 500') }}"
+                                           value="{{ $store->employee_earning_fixed_amount }}">
+                                </div>
+                            </div>
+
+                            {{-- Percentage + cap fields --}}
+                            <div class="col-sm-6 earning-percentage-section {{ $earningType != 'percentage' ? 'd-none' : '' }}">
+                                <div class="form-group">
+                                    <label class="input-label text-capitalize" for="employee_earning_percentage">
+                                        {{ translate('Percentage (%)') }}
+                                        <span class="input-label-secondary" data-toggle="tooltip" data-placement="right"
+                                              data-original-title="{{ translate('Percentage of order amount credited to the employee wallet.') }}">
+                                            <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
+                                        </span>
+                                    </label>
+                                    <input id="employee_earning_percentage" type="number" step="0.01" min="0" max="100"
+                                           class="form-control h--45px" name="employee_earning_percentage"
+                                           placeholder="{{ translate('e.g. 10') }}"
+                                           value="{{ $store->employee_earning_percentage }}">
+                                </div>
+                            </div>
+                            <div class="col-sm-6 earning-percentage-section {{ $earningType != 'percentage' ? 'd-none' : '' }}">
+                                <div class="form-group">
+                                    <label class="input-label text-capitalize" for="employee_earning_cap">
+                                        {{ translate('Maximum Cap Amount') }}
+                                        <span class="input-label-secondary" data-toggle="tooltip" data-placement="right"
+                                              data-original-title="{{ translate('The maximum amount that can be earned per order regardless of the percentage. Leave blank for no cap.') }}">
+                                            <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
+                                        </span>
+                                    </label>
+                                    <input id="employee_earning_cap" type="number" step="0.01" min="0"
+                                           class="form-control h--45px" name="employee_earning_cap"
+                                           placeholder="{{ translate('e.g. 2000 (optional)') }}"
+                                           value="{{ $store->employee_earning_cap }}">
+                                </div>
+                            </div>
+
+                            <div class="col-12">
+                                <div class="justify-content-end btn--container">
+                                    <button type="submit" class="btn btn--primary">{{ translate('Save Earnings Setup') }}</button>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
             @if (!config('module.'.$store->module->module_type)['always_open'])
             <div class="card mt-3">
                 <div class="card-header">
@@ -552,6 +654,19 @@
                     $('#loading').hide();
                 },
             });
+        });
+        // ── Employee Earnings type toggle ────────────────────────────────
+        $('input[name="employee_earning_type"]').on('change', function () {
+            var val = $(this).val();
+            if (val === 'fixed') {
+                $('.earning-fixed-section').removeClass('d-none');
+                $('.earning-percentage-section').addClass('d-none');
+            } else if (val === 'percentage') {
+                $('.earning-percentage-section').removeClass('d-none');
+                $('.earning-fixed-section').addClass('d-none');
+            } else {
+                $('.earning-fixed-section, .earning-percentage-section').addClass('d-none');
+            }
         });
     </script>
 @endpush

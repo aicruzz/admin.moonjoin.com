@@ -91,6 +91,173 @@
 
                 </div>
             </div>
+            {{-- ===== Employee Wallets ===== --}}
+            @php($storeEmployees = \App\Models\VendorEmployee::with('wallet')->where('store_id', $store->id)->get())
+            @if($storeEmployees->count())
+            <div class="card mt-4">
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <h5 class="card-title m-0 d-flex align-items-center">
+                        <span class="card-header-icon mr-2"><i class="tio-wallet-outlined"></i></span>
+                        <span class="ml-1">{{ translate('Employee Wallets') }}</span>
+                    </h5>
+                    @php($earningType = $store->employee_earning_type ?? 'none')
+                    <span class="badge badge-{{ $earningType == 'none' ? 'secondary' : 'success' }} text-capitalize">
+                        {{ translate('Earning type') }}: {{ translate(ucfirst($earningType)) }}
+                        @if($earningType == 'fixed')
+                            — {{ \App\CentralLogics\Helpers::format_currency($store->employee_earning_fixed_amount ?? 0) }}
+                        @elseif($earningType == 'percentage')
+                            — {{ $store->employee_earning_percentage }}%
+                            @if($store->employee_earning_cap)
+                                ({{ translate('cap') }}: {{ \App\CentralLogics\Helpers::format_currency($store->employee_earning_cap) }})
+                            @endif
+                        @endif
+                    </span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-borderless table-thead-bordered table-nowrap table-align-middle card-table">
+                            <thead class="thead-light">
+                                <tr>
+                                    <th>{{ translate('Employee') }}</th>
+                                    <th>{{ translate('Role') }}</th>
+                                    <th>{{ translate('Wallet Balance') }}</th>
+                                    <th>{{ translate('Pending Withdraw') }}</th>
+                                    <th class="text-right">{{ translate('Action') }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach($storeEmployees as $emp)
+                                @php($pendingWd = \App\Models\EmployeeWalletTransaction::where('employee_id', $emp->id)->where('type','withdraw')->where('status','pending')->sum('amount'))
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="avatar avatar-sm avatar-circle">
+                                                <img class="avatar-img onerror-image"
+                                                     data-onerror-image="{{ asset('public/assets/admin/img/160x160/img1.jpg') }}"
+                                                     src="{{ $emp->image_full_url ?? asset('public/assets/admin/img/160x160/img1.jpg') }}"
+                                                     alt="{{ $emp->f_name }}">
+                                            </div>
+                                            <span>{{ $emp->f_name }} {{ $emp->l_name }}</span>
+                                        </div>
+                                    </td>
+                                    <td>{{ $emp->role?->name ?? '—' }}</td>
+                                    <td>
+                                        <strong>{{ \App\CentralLogics\Helpers::format_currency($emp->wallet_balance ?? 0) }}</strong>
+                                    </td>
+                                    <td>
+                                        @if($pendingWd > 0)
+                                            <span class="badge badge-warning">{{ \App\CentralLogics\Helpers::format_currency($pendingWd) }}</span>
+                                        @else
+                                            <span class="text-muted">—</span>
+                                        @endif
+                                    </td>
+                                    <td class="text-right">
+                                        <button type="button" class="btn btn-sm btn--primary"
+                                                data-toggle="modal"
+                                                data-target="#creditModal-{{ $emp->id }}"
+                                                title="{{ translate('Credit Wallet') }}">
+                                            <i class="tio-add"></i> {{ translate('Credit') }}
+                                        </button>
+                                        @if($pendingWd > 0)
+                                        <button type="button" class="btn btn-sm btn--success ml-1"
+                                                data-toggle="modal"
+                                                data-target="#payoutModal-{{ $emp->id }}"
+                                                title="{{ translate('Approve Payout') }}">
+                                            <i class="tio-money-outlined"></i> {{ translate('Payout') }}
+                                        </button>
+                                        @endif
+                                    </td>
+                                </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            {{-- Credit modals --}}
+            @foreach($storeEmployees as $emp)
+            <div class="modal fade" id="creditModal-{{ $emp->id }}" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">{{ translate('Credit Wallet') }} — {{ $emp->f_name }} {{ $emp->l_name }}</h5>
+                            <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+                        </div>
+                        <form action="{{ route('admin.store.employee-wallet.credit', [$store->id, $emp->id]) }}" method="POST">
+                            @csrf
+                            <div class="modal-body">
+                                <div class="form-group">
+                                    <label class="input-label">{{ translate('Amount') }} <span class="text-danger">*</span></label>
+                                    <input type="number" name="amount" step="0.01" min="0.01" class="form-control" required
+                                           placeholder="{{ translate('e.g. 500') }}">
+                                </div>
+                                <div class="form-group">
+                                    <label class="input-label">{{ translate('Note') }}</label>
+                                    <input type="text" name="note" class="form-control" maxlength="300"
+                                           placeholder="{{ translate('Optional note') }}">
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn--reset" data-dismiss="modal">{{ translate('Cancel') }}</button>
+                                <button type="submit" class="btn btn--primary">{{ translate('Credit Wallet') }}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            {{-- Payout modal --}}
+            @php($pendingTxns = \App\Models\EmployeeWalletTransaction::where('employee_id', $emp->id)->where('type','withdraw')->where('status','pending')->get())
+            @if($pendingTxns->count())
+            <div class="modal fade" id="payoutModal-{{ $emp->id }}" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">{{ translate('Pending Payouts') }} — {{ $emp->f_name }} {{ $emp->l_name }}</h5>
+                            <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+                        </div>
+                        <div class="modal-body p-0">
+                            <table class="table table-sm mb-0">
+                                <thead class="thead-light">
+                                    <tr>
+                                        <th>{{ translate('Amount') }}</th>
+                                        <th>{{ translate('Bank') }}</th>
+                                        <th>{{ translate('Date') }}</th>
+                                        <th class="text-right">{{ translate('Action') }}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($pendingTxns as $txn)
+                                    @php($wFields = json_decode($txn->withdrawal_method_fields ?? '{}', true))
+                                    <tr>
+                                        <td>{{ \App\CentralLogics\Helpers::format_currency($txn->amount) }}</td>
+                                        <td>
+                                            <small>{{ $wFields['bank_name'] ?? '—' }}<br>{{ $wFields['account_number'] ?? '' }}</small>
+                                        </td>
+                                        <td><small>{{ $txn->created_at?->format('d M Y') }}</small></td>
+                                        <td class="text-right">
+                                            <form action="{{ route('admin.store.employee-wallet.payout', [$store->id, $txn->id]) }}" method="POST" class="d-inline">
+                                                @csrf
+                                                <button type="submit" class="btn btn-xs btn--success">{{ translate('Approve') }}</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn--reset" data-dismiss="modal">{{ translate('Close') }}</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            @endif
+            @endforeach
+            @endif
+            {{-- ===== End Employee Wallets ===== --}}
+
             <div class="card mt-4">
                 <div class="card-header">
                     <h5 class="card-title m-0 d-flex align-items-center">

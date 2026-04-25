@@ -13,6 +13,8 @@ class EmployeeWalletTransaction extends Model
         'reason',
         'note',
         'type',
+        'status',
+        'withdrawal_method_fields',
     ];
 
     public function employee()

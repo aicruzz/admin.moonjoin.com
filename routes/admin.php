@@ -212,6 +212,9 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
                 Route::post('discount/{store}', 'VendorController@discountSetup')->name('discount');
                 Route::post('update-settings/{store}', 'VendorController@updateStoreSettings')->name('update-settings');
                 Route::post('update-meta-data/{store}', 'VendorController@updateStoreMetaData')->name('update-meta-data');
+                Route::post('update-employee-earning/{store}', 'VendorController@updateEmployeeEarning')->name('update-employee-earning');
+                Route::post('{store}/employee-wallet/credit/{employee}', 'VendorController@adminCreditEmployeeWallet')->name('employee-wallet.credit');
+                Route::post('{store}/employee-wallet/payout/{transaction}', 'VendorController@adminPayoutEmployeeWallet')->name('employee-wallet.payout');
                 Route::delete('delete/{store}', 'VendorController@destroy')->name('delete');
                 Route::delete('clear-discount/{store}', 'VendorController@cleardiscount')->name('clear-discount');
                 // Route::get('view/{store}', 'VendorController@view')->name('view_tab');

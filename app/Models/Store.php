@@ -143,6 +143,10 @@ class Store extends Model
         'tin',
         'tin_expire_date',
         'tin_certificate_image',
+        'employee_earning_type',
+        'employee_earning_fixed_amount',
+        'employee_earning_percentage',
+        'employee_earning_cap',
     ];
 
     /**
@@ -185,6 +189,10 @@ class Store extends Model
         'reviews_comments_count'=>'integer',
         'package_id'=>'integer',
         'distance' => 'float',
+        'employee_earning_type' => 'string',
+        'employee_earning_fixed_amount' => 'float',
+        'employee_earning_percentage' => 'float',
+        'employee_earning_cap' => 'float',
     ];
 
     /**
