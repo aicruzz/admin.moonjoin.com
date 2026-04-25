@@ -318,6 +318,98 @@
                             </div>
                         </div>
 
+                        {{-- ===== Employee Earnings Global Setup ===== --}}
+                        @php($global_earning_type = \App\Models\BusinessSetting::where('key', 'employee_earning_type')->first()?->value ?? 'none')
+                        @php($global_earning_fixed = \App\Models\BusinessSetting::where('key', 'employee_earning_fixed_amount')->first()?->value)
+                        @php($global_earning_pct = \App\Models\BusinessSetting::where('key', 'employee_earning_percentage')->first()?->value)
+                        @php($global_earning_cap = \App\Models\BusinessSetting::where('key', 'employee_earning_cap')->first()?->value)
+                        <hr class="mt-4">
+                        <div class="row g-3 align-items-end mt-2">
+                            <div class="col-12">
+                                <h6 class="font-semibold mb-1">{{ translate('Vendor Employee Earning Setup') }}</h6>
+                                <p class="fs-12 text-muted m-0">{{ translate('Set the global default earning type and values for vendor employees across all stores.') }}</p>
+                            </div>
+                            <div class="col-lg-4 col-sm-6">
+                                <div class="form-group mb-0">
+                                    <label class="input-label text-capitalize d-flex align-items-center">
+                                        <span class="line--limit-1">{{ translate('Employee Earning Type') }}</span>
+                                        <span class="form-label-secondary" data-toggle="tooltip" data-placement="right"
+                                              data-original-title="{{ translate('Choose how vendor employees earn: None (no earning), Fixed Amount per order, or a Percentage of order with an optional cap.') }}">
+                                            <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
+                                        </span>
+                                    </label>
+                                    <div class="restaurant-type-group border">
+                                        <label class="form-check form--check mr-2 mr-md-4">
+                                            <input class="form-check-input" type="radio" name="employee_earning_type"
+                                                   id="global_earning_none" value="none"
+                                                {{ $global_earning_type == 'none' ? 'checked' : '' }}>
+                                            <span class="form-check-label">{{ translate('None') }}</span>
+                                        </label>
+                                        <label class="form-check form--check mr-2 mr-md-4">
+                                            <input class="form-check-input" type="radio" name="employee_earning_type"
+                                                   id="global_earning_fixed" value="fixed"
+                                                {{ $global_earning_type == 'fixed' ? 'checked' : '' }}>
+                                            <span class="form-check-label">{{ translate('Fixed Amount') }}</span>
+                                        </label>
+                                        <label class="form-check form--check mr-2 mr-md-4">
+                                            <input class="form-check-input" type="radio" name="employee_earning_type"
+                                                   id="global_earning_percentage" value="percentage"
+                                                {{ $global_earning_type == 'percentage' ? 'checked' : '' }}>
+                                            <span class="form-check-label">{{ translate('Percentage (with Cap)') }}</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-lg-4 col-sm-6 global-earning-fixed-section {{ $global_earning_type != 'fixed' ? 'd-none' : '' }}">
+                                <div class="form-group mb-0">
+                                    <label class="input-label text-capitalize" for="employee_earning_fixed_amount">
+                                        {{ translate('Default Fixed Amount Per Order') }}
+                                        ({{ \App\CentralLogics\Helpers::currency_symbol() }})
+                                        <span class="form-label-secondary" data-toggle="tooltip" data-placement="right"
+                                              data-original-title="{{ translate('Default flat amount credited to an employee wallet per completed order. Overridable per store.') }}">
+                                            <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
+                                        </span>
+                                    </label>
+                                    <input id="employee_earning_fixed_amount" type="number" step="0.01" min="0"
+                                           class="form-control" name="employee_earning_fixed_amount"
+                                           placeholder="{{ translate('e.g. 500') }}" value="{{ $global_earning_fixed }}">
+                                </div>
+                            </div>
+
+                            <div class="col-lg-4 col-sm-6 global-earning-pct-section {{ $global_earning_type != 'percentage' ? 'd-none' : '' }}">
+                                <div class="form-group mb-0">
+                                    <label class="input-label text-capitalize" for="employee_earning_percentage">
+                                        {{ translate('Default Percentage (%)') }}
+                                        <span class="form-label-secondary" data-toggle="tooltip" data-placement="right"
+                                              data-original-title="{{ translate('Default percentage of order amount credited to the employee wallet. Overridable per store.') }}">
+                                            <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
+                                        </span>
+                                    </label>
+                                    <input id="employee_earning_percentage" type="number" step="0.01" min="0" max="100"
+                                           class="form-control" name="employee_earning_percentage"
+                                           placeholder="{{ translate('e.g. 10') }}" value="{{ $global_earning_pct }}">
+                                </div>
+                            </div>
+
+                            <div class="col-lg-4 col-sm-6 global-earning-pct-section {{ $global_earning_type != 'percentage' ? 'd-none' : '' }}">
+                                <div class="form-group mb-0">
+                                    <label class="input-label text-capitalize" for="employee_earning_cap">
+                                        {{ translate('Default Maximum Cap') }}
+                                        ({{ \App\CentralLogics\Helpers::currency_symbol() }})
+                                        <span class="form-label-secondary" data-toggle="tooltip" data-placement="right"
+                                              data-original-title="{{ translate('Maximum earning per order regardless of percentage. Leave blank for no cap.') }}">
+                                            <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
+                                        </span>
+                                    </label>
+                                    <input id="employee_earning_cap" type="number" step="0.01" min="0"
+                                           class="form-control" name="employee_earning_cap"
+                                           placeholder="{{ translate('e.g. 2000 (optional)') }}" value="{{ $global_earning_cap }}">
+                                </div>
+                            </div>
+                        </div>
+                        {{-- ===== End Employee Earnings Global Setup ===== --}}
+
                         <div class="btn--container justify-content-end mt-20">
                             <button type="reset" class="btn btn--reset">{{ translate('messages.reset') }}</button>
                             <button type="{{ env('APP_MODE') != 'demo' ? 'submit' : 'button' }}"
@@ -630,3 +722,23 @@
 </div>
 
 @endsection
+
+@push('script_2')
+<script>
+    "use strict";
+    $(document).ready(function () {
+        $('input[name="employee_earning_type"]').on('change', function () {
+            var val = $(this).val();
+            if (val === 'fixed') {
+                $('.global-earning-fixed-section').removeClass('d-none');
+                $('.global-earning-pct-section').addClass('d-none');
+            } else if (val === 'percentage') {
+                $('.global-earning-pct-section').removeClass('d-none');
+                $('.global-earning-fixed-section').addClass('d-none');
+            } else {
+                $('.global-earning-fixed-section, .global-earning-pct-section').addClass('d-none');
+            }
+        });
+    });
+</script>
+@endpush

@@ -284,6 +284,19 @@ class BusinessSettingsController extends Controller
             'value' => $request['product_gallery'],
         ]);
 
+        Helpers::businessUpdateOrInsert(['key' => 'employee_earning_type'], [
+            'value' => $request['employee_earning_type'] ?? 'none',
+        ]);
+        Helpers::businessUpdateOrInsert(['key' => 'employee_earning_fixed_amount'], [
+            'value' => $request['employee_earning_fixed_amount'],
+        ]);
+        Helpers::businessUpdateOrInsert(['key' => 'employee_earning_percentage'], [
+            'value' => $request['employee_earning_percentage'],
+        ]);
+        Helpers::businessUpdateOrInsert(['key' => 'employee_earning_cap'], [
+            'value' => $request['employee_earning_cap'],
+        ]);
+
         Toastr::success(translate('messages.successfully_updated_to_changes_restart_app'));
 
         return back();
