@@ -91,16 +91,15 @@
 
                 </div>
             </div>
-            {{-- ===== Per-Store Employee Earning Config & Wallets ===== --}}
-            @php($globalEarningType = \App\Models\BusinessSetting::where('key','employee_earning_type')->first()?->value ?? 'none')
-            @php($storeEarningType  = $store->employee_earning_type ?? 'none')
-            @php($storeEmployees    = \App\Models\VendorEmployee::where('store_id', $store->id)->get())
+            {{-- ===== Employee Wallets ===== --}}
+            @php($storeEarningType = $store->employee_earning_type ?? 'none')
+            @php($storeEmployees   = \App\Models\VendorEmployee::where('store_id', $store->id)->get())
 
             <div class="card mt-4">
                 <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
                     <h5 class="card-title m-0 d-flex align-items-center">
                         <span class="card-header-icon mr-2"><i class="tio-wallet-outlined"></i></span>
-                        <span class="ml-1">{{ translate('Employee Earnings & Wallets') }}</span>
+                        <span class="ml-1">{{ translate('Employee Wallets') }}</span>
                     </h5>
                     <span class="badge badge-{{ $storeEarningType == 'none' ? 'secondary' : 'success' }} text-capitalize">
                         {{ translate('Earning type') }}: {{ translate(ucfirst($storeEarningType)) }}
@@ -114,90 +113,11 @@
                         @endif
                     </span>
                 </div>
-                <div class="card-body">
-                    {{-- Per-store earning config (constrained by global type) --}}
-                    <form action="{{ route('admin.store.update-employee-earning', $store->id) }}" method="POST" class="mb-4">
-                        @csrf
-                        <div class="row g-3 align-items-end">
-                            <div class="col-12">
-                                <label class="input-label text-capitalize d-block mb-1">
-                                    {{ translate('Earning Type for This Store') }}
-                                    <span class="input-label-secondary" data-toggle="tooltip" data-placement="right"
-                                          data-original-title="{{ translate('Configure how employees at this store earn. Only types enabled in the global setting are available.') }}">
-                                        <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
-                                    </span>
-                                </label>
-                                <div class="restaurant-type-group border">
-                                    <label class="form-check form--check mr-2 mr-md-4">
-                                        <input class="form-check-input store-earning-radio" type="radio"
-                                               name="employee_earning_type" value="none"
-                                            {{ $storeEarningType == 'none' ? 'checked' : '' }}>
-                                        <span class="form-check-label">{{ translate('None') }}</span>
-                                    </label>
-                                    @if($globalEarningType == 'fixed' || $globalEarningType == 'none')
-                                    <label class="form-check form--check mr-2 mr-md-4 {{ $globalEarningType == 'none' ? 'opacity-50' : '' }}">
-                                        <input class="form-check-input store-earning-radio" type="radio"
-                                               name="employee_earning_type" value="fixed"
-                                            {{ $storeEarningType == 'fixed' ? 'checked' : '' }}
-                                            {{ $globalEarningType == 'none' ? 'disabled' : '' }}>
-                                        <span class="form-check-label">{{ translate('Fixed Amount') }}</span>
-                                    </label>
-                                    @endif
-                                    @if($globalEarningType == 'percentage' || $globalEarningType == 'none')
-                                    <label class="form-check form--check mr-2 mr-md-4 {{ $globalEarningType == 'none' ? 'opacity-50' : '' }}">
-                                        <input class="form-check-input store-earning-radio" type="radio"
-                                               name="employee_earning_type" value="percentage"
-                                            {{ $storeEarningType == 'percentage' ? 'checked' : '' }}
-                                            {{ $globalEarningType == 'none' ? 'disabled' : '' }}>
-                                        <span class="form-check-label">{{ translate('Percentage (with Cap)') }}</span>
-                                    </label>
-                                    @endif
-                                </div>
-                                @if($globalEarningType == 'none')
-                                    <small class="text-warning d-block mt-1">{{ translate('Global earning type is set to None. Enable Fixed or Percentage in Store Setup settings to unlock options here.') }}</small>
-                                @endif
-                            </div>
-
-                            <div class="col-sm-4 store-earning-fixed {{ $storeEarningType != 'fixed' ? 'd-none' : '' }}">
-                                <div class="form-group mb-0">
-                                    <label class="input-label text-capitalize">{{ translate('Fixed Amount Per Order') }} ({{ \App\CentralLogics\Helpers::currency_symbol() }})</label>
-                                    <input type="number" step="0.01" min="0" class="form-control"
-                                           name="employee_earning_fixed_amount"
-                                           placeholder="{{ translate('e.g. 500') }}"
-                                           value="{{ $store->employee_earning_fixed_amount }}">
-                                </div>
-                            </div>
-
-                            <div class="col-sm-4 store-earning-pct {{ $storeEarningType != 'percentage' ? 'd-none' : '' }}">
-                                <div class="form-group mb-0">
-                                    <label class="input-label text-capitalize">{{ translate('Percentage (%)') }}</label>
-                                    <input type="number" step="0.01" min="0" max="100" class="form-control"
-                                           name="employee_earning_percentage"
-                                           placeholder="{{ translate('e.g. 10') }}"
-                                           value="{{ $store->employee_earning_percentage }}">
-                                </div>
-                            </div>
-
-                            <div class="col-sm-4 store-earning-pct {{ $storeEarningType != 'percentage' ? 'd-none' : '' }}">
-                                <div class="form-group mb-0">
-                                    <label class="input-label text-capitalize">{{ translate('Max Cap') }} ({{ \App\CentralLogics\Helpers::currency_symbol() }}) <small class="text-muted">{{ translate('optional') }}</small></label>
-                                    <input type="number" step="0.01" min="0" class="form-control"
-                                           name="employee_earning_cap"
-                                           placeholder="{{ translate('e.g. 2000') }}"
-                                           value="{{ $store->employee_earning_cap }}">
-                                </div>
-                            </div>
-
-                            <div class="col-12">
-                                <button type="submit" class="btn btn--primary btn-sm">{{ translate('Save Earning Setup') }}</button>
-                            </div>
-                        </div>
-                    </form>
-
-                    {{-- Employee wallet table --}}
-                    @if($storeEmployees->count())
-                    <hr>
-                    <div class="table-responsive mt-3">
+                <div class="card-body {{ $storeEmployees->isEmpty() ? '' : 'p-0' }}">
+                    @if($storeEmployees->isEmpty())
+                        <p class="text-muted m-0">{{ translate('No employees found for this store.') }}</p>
+                    @else
+                    <div class="table-responsive">
                         <table class="table table-hover table-borderless table-thead-bordered table-nowrap table-align-middle card-table">
                             <thead class="thead-light">
                                 <tr>
@@ -253,7 +173,7 @@
                 </div>
             </div>
 
-            {{-- Credit & Payout modals --}}
+            {{-- Credit & Payout modals (only when there are employees) --}}
             @foreach($storeEmployees as $emp)
             <div class="modal fade" id="creditModal-{{ $emp->id }}" tabindex="-1">
                 <div class="modal-dialog">
@@ -326,7 +246,7 @@
             </div>
             @endif
             @endforeach
-            {{-- ===== End Employee Earnings & Wallets ===== --}}
+            {{-- ===== End Employee Wallets ===== --}}
 
             <div class="card mt-4">
                 <div class="card-header">

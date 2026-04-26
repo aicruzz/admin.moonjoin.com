@@ -284,8 +284,9 @@ class BusinessSettingsController extends Controller
             'value' => $request['product_gallery'],
         ]);
 
-        Helpers::businessUpdateOrInsert(['key' => 'employee_earning_type'], [
-            'value' => $request['employee_earning_type'] ?? 'none',
+        $enabledTypes = $request->input('employee_earning_enabled_types', ['none']);
+        Helpers::businessUpdateOrInsert(['key' => 'employee_earning_enabled_types'], [
+            'value' => json_encode(array_values($enabledTypes)),
         ]);
         Helpers::businessUpdateOrInsert(['key' => 'employee_earning_fixed_amount'], [
             'value' => $request['employee_earning_fixed_amount'],

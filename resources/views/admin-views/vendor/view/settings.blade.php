@@ -350,6 +350,103 @@
                     </div>
                 </div>
             </div>
+
+            {{-- ===== Per-Store Employee Earning Config ===== --}}
+            @php($enabled_raw   = \App\Models\BusinessSetting::where('key','employee_earning_enabled_types')->first()?->value ?? '["none"]')
+            @php($enabled_types = json_decode($enabled_raw, true) ?? ['none'])
+            @php($storeEarning  = $store->employee_earning_type ?? 'none')
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="card-title">
+                        <span class="card-header-icon"><i class="tio-wallet-outlined"></i></span>
+                        <span class="p-md-1">{{ translate('Employee Earning Setup') }}</span>
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ route('admin.store.update-employee-earning', $store->id) }}" method="POST">
+                        @csrf
+                        <div class="row g-3 align-items-end">
+
+                            {{-- Earning type radio — shows only globally enabled options --}}
+                            <div class="col-12">
+                                <label class="input-label text-capitalize d-block mb-2">
+                                    {{ translate('Earning Type') }}
+                                    <span class="input-label-secondary" data-toggle="tooltip" data-placement="right"
+                                          data-original-title="{{ translate('Select the earning model for employees at this store. Only types enabled globally are shown.') }}">
+                                        <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
+                                    </span>
+                                </label>
+                                <div class="restaurant-type-group border">
+                                    @foreach($enabled_types as $type)
+                                    <label class="form-check form--check mr-2 mr-md-4">
+                                        <input class="form-check-input settings-earning-radio" type="radio"
+                                               name="employee_earning_type" value="{{ $type }}"
+                                            {{ $storeEarning == $type ? 'checked' : '' }}>
+                                        <span class="form-check-label">
+                                            @if($type == 'none') {{ translate('None') }}
+                                            @elseif($type == 'fixed') {{ translate('Fixed Amount') }}
+                                            @else {{ translate('Percentage (with Cap)') }}
+                                            @endif
+                                        </span>
+                                    </label>
+                                    @endforeach
+                                </div>
+                                @if(count($enabled_types) === 1 && $enabled_types[0] === 'none')
+                                    <small class="text-warning d-block mt-1">
+                                        {{ translate('Only "None" is enabled globally. Go to Business Setup → Store Setup to enable Fixed or Percentage types.') }}
+                                    </small>
+                                @endif
+                            </div>
+
+                            {{-- Fixed amount field --}}
+                            <div class="col-sm-6 settings-earning-fixed {{ $storeEarning != 'fixed' ? 'd-none' : '' }}">
+                                <div class="form-group mb-0">
+                                    <label class="input-label text-capitalize">
+                                        {{ translate('Fixed Amount Per Order') }} ({{ \App\CentralLogics\Helpers::currency_symbol() }})
+                                    </label>
+                                    <input type="number" step="0.01" min="0" class="form-control"
+                                           name="employee_earning_fixed_amount"
+                                           placeholder="{{ translate('e.g. 500') }}"
+                                           value="{{ $store->employee_earning_fixed_amount }}">
+                                </div>
+                            </div>
+
+                            {{-- Percentage field --}}
+                            <div class="col-sm-6 settings-earning-pct {{ $storeEarning != 'percentage' ? 'd-none' : '' }}">
+                                <div class="form-group mb-0">
+                                    <label class="input-label text-capitalize">{{ translate('Percentage (%)') }}</label>
+                                    <input type="number" step="0.01" min="0" max="100" class="form-control"
+                                           name="employee_earning_percentage"
+                                           placeholder="{{ translate('e.g. 10') }}"
+                                           value="{{ $store->employee_earning_percentage }}">
+                                </div>
+                            </div>
+
+                            {{-- Cap field --}}
+                            <div class="col-sm-6 settings-earning-pct {{ $storeEarning != 'percentage' ? 'd-none' : '' }}">
+                                <div class="form-group mb-0">
+                                    <label class="input-label text-capitalize">
+                                        {{ translate('Maximum Cap') }} ({{ \App\CentralLogics\Helpers::currency_symbol() }})
+                                        <small class="text-muted">{{ translate('optional') }}</small>
+                                    </label>
+                                    <input type="number" step="0.01" min="0" class="form-control"
+                                           name="employee_earning_cap"
+                                           placeholder="{{ translate('e.g. 2000') }}"
+                                           value="{{ $store->employee_earning_cap }}">
+                                </div>
+                            </div>
+
+                            <div class="col-12">
+                                <div class="justify-content-end btn--container">
+                                    <button type="submit" class="btn btn--primary">{{ translate('Save Earning Setup') }}</button>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            {{-- ===== End Per-Store Employee Earning Config ===== --}}
+
             @if (!config('module.'.$store->module->module_type)['always_open'])
             <div class="card mt-3">
                 <div class="card-header">
@@ -554,17 +651,17 @@
                 },
             });
         });
-        // ── Employee Earnings type toggle ────────────────────────────────
-        $('input[name="employee_earning_type"]').on('change', function () {
+        // ── Settings page per-store earning type toggle ──────────────────
+        $(document).on('change', '.settings-earning-radio', function () {
             var val = $(this).val();
             if (val === 'fixed') {
-                $('.earning-fixed-section').removeClass('d-none');
-                $('.earning-percentage-section').addClass('d-none');
+                $('.settings-earning-fixed').removeClass('d-none');
+                $('.settings-earning-pct').addClass('d-none');
             } else if (val === 'percentage') {
-                $('.earning-percentage-section').removeClass('d-none');
-                $('.earning-fixed-section').addClass('d-none');
+                $('.settings-earning-pct').removeClass('d-none');
+                $('.settings-earning-fixed').addClass('d-none');
             } else {
-                $('.earning-fixed-section, .earning-percentage-section').addClass('d-none');
+                $('.settings-earning-fixed, .settings-earning-pct').addClass('d-none');
             }
         });
     </script>

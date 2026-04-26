@@ -319,55 +319,57 @@
                         </div>
 
                         {{-- ===== Employee Earnings Global Setup ===== --}}
-                        @php($global_earning_type = \App\Models\BusinessSetting::where('key', 'employee_earning_type')->first()?->value ?? 'none')
-                        @php($global_earning_fixed = \App\Models\BusinessSetting::where('key', 'employee_earning_fixed_amount')->first()?->value)
-                        @php($global_earning_pct = \App\Models\BusinessSetting::where('key', 'employee_earning_percentage')->first()?->value)
-                        @php($global_earning_cap = \App\Models\BusinessSetting::where('key', 'employee_earning_cap')->first()?->value)
+                        @php($enabled_raw = \App\Models\BusinessSetting::where('key','employee_earning_enabled_types')->first()?->value ?? '["none"]')
+                        @php($enabled_types = json_decode($enabled_raw, true) ?? ['none'])
+                        @php($global_earning_fixed = \App\Models\BusinessSetting::where('key','employee_earning_fixed_amount')->first()?->value)
+                        @php($global_earning_pct   = \App\Models\BusinessSetting::where('key','employee_earning_percentage')->first()?->value)
+                        @php($global_earning_cap   = \App\Models\BusinessSetting::where('key','employee_earning_cap')->first()?->value)
                         <hr class="mt-4">
-                        <div class="row g-3 align-items-end mt-2">
+                        <div class="row g-3 align-items-start mt-2">
                             <div class="col-12">
                                 <h6 class="font-semibold mb-1">{{ translate('Vendor Employee Earning Setup') }}</h6>
-                                <p class="fs-12 text-muted m-0">{{ translate('Set the global default earning type and values for vendor employees across all stores.') }}</p>
+                                <p class="fs-12 text-muted m-0">{{ translate('Select which earning types are available system-wide. Admins can then pick one per store from the enabled options.') }}</p>
                             </div>
-                            <div class="col-lg-4 col-sm-6">
-                                <div class="form-group mb-0">
-                                    <label class="input-label text-capitalize d-flex align-items-center">
-                                        <span class="line--limit-1">{{ translate('Employee Earning Type') }}</span>
-                                        <span class="form-label-secondary" data-toggle="tooltip" data-placement="right"
-                                              data-original-title="{{ translate('Choose how vendor employees earn: None (no earning), Fixed Amount per order, or a Percentage of order with an optional cap.') }}">
-                                            <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
-                                        </span>
+
+                            {{-- Multi-select checkboxes --}}
+                            <div class="col-12">
+                                <label class="input-label text-capitalize d-block mb-2">
+                                    {{ translate('Enable Earning Types') }}
+                                    <span class="form-label-secondary" data-toggle="tooltip" data-placement="right"
+                                          data-original-title="{{ translate('Check all earning types you want admins to be able to assign to stores.') }}">
+                                        <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
+                                    </span>
+                                </label>
+                                <div class="d-flex flex-wrap gap-3">
+                                    <label class="border rounded px-3 py-2 d-flex align-items-center gap-2 cursor-pointer {{ in_array('none', $enabled_types) ? 'border-primary' : '' }}">
+                                        <input type="checkbox" name="employee_earning_enabled_types[]" value="none"
+                                               id="enable_none" class="global-earning-checkbox"
+                                            {{ in_array('none', $enabled_types) ? 'checked' : '' }}>
+                                        <span>{{ translate('None') }}</span>
                                     </label>
-                                    <div class="restaurant-type-group border">
-                                        <label class="form-check form--check mr-2 mr-md-4">
-                                            <input class="form-check-input" type="radio" name="employee_earning_type"
-                                                   id="global_earning_none" value="none"
-                                                {{ $global_earning_type == 'none' ? 'checked' : '' }}>
-                                            <span class="form-check-label">{{ translate('None') }}</span>
-                                        </label>
-                                        <label class="form-check form--check mr-2 mr-md-4">
-                                            <input class="form-check-input" type="radio" name="employee_earning_type"
-                                                   id="global_earning_fixed" value="fixed"
-                                                {{ $global_earning_type == 'fixed' ? 'checked' : '' }}>
-                                            <span class="form-check-label">{{ translate('Fixed Amount') }}</span>
-                                        </label>
-                                        <label class="form-check form--check mr-2 mr-md-4">
-                                            <input class="form-check-input" type="radio" name="employee_earning_type"
-                                                   id="global_earning_percentage" value="percentage"
-                                                {{ $global_earning_type == 'percentage' ? 'checked' : '' }}>
-                                            <span class="form-check-label">{{ translate('Percentage (with Cap)') }}</span>
-                                        </label>
-                                    </div>
+                                    <label class="border rounded px-3 py-2 d-flex align-items-center gap-2 cursor-pointer {{ in_array('fixed', $enabled_types) ? 'border-primary' : '' }}">
+                                        <input type="checkbox" name="employee_earning_enabled_types[]" value="fixed"
+                                               id="enable_fixed" class="global-earning-checkbox"
+                                            {{ in_array('fixed', $enabled_types) ? 'checked' : '' }}>
+                                        <span>{{ translate('Fixed Amount') }}</span>
+                                    </label>
+                                    <label class="border rounded px-3 py-2 d-flex align-items-center gap-2 cursor-pointer {{ in_array('percentage', $enabled_types) ? 'border-primary' : '' }}">
+                                        <input type="checkbox" name="employee_earning_enabled_types[]" value="percentage"
+                                               id="enable_percentage" class="global-earning-checkbox"
+                                            {{ in_array('percentage', $enabled_types) ? 'checked' : '' }}>
+                                        <span>{{ translate('Percentage (with Cap)') }}</span>
+                                    </label>
                                 </div>
                             </div>
 
-                            <div class="col-lg-4 col-sm-6 global-earning-fixed-section {{ $global_earning_type != 'fixed' ? 'd-none' : '' }}">
+                            {{-- Default Fixed Amount (shown when fixed is checked) --}}
+                            <div class="col-lg-4 col-sm-6 global-earning-fixed-section {{ !in_array('fixed', $enabled_types) ? 'd-none' : '' }}">
                                 <div class="form-group mb-0">
                                     <label class="input-label text-capitalize" for="employee_earning_fixed_amount">
                                         {{ translate('Default Fixed Amount Per Order') }}
                                         ({{ \App\CentralLogics\Helpers::currency_symbol() }})
                                         <span class="form-label-secondary" data-toggle="tooltip" data-placement="right"
-                                              data-original-title="{{ translate('Default flat amount credited to an employee wallet per completed order. Overridable per store.') }}">
+                                              data-original-title="{{ translate('Default flat amount per completed order. Stores can override this.') }}">
                                             <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
                                         </span>
                                     </label>
@@ -377,12 +379,13 @@
                                 </div>
                             </div>
 
-                            <div class="col-lg-4 col-sm-6 global-earning-pct-section {{ $global_earning_type != 'percentage' ? 'd-none' : '' }}">
+                            {{-- Default Percentage (shown when percentage is checked) --}}
+                            <div class="col-lg-4 col-sm-6 global-earning-pct-section {{ !in_array('percentage', $enabled_types) ? 'd-none' : '' }}">
                                 <div class="form-group mb-0">
                                     <label class="input-label text-capitalize" for="employee_earning_percentage">
                                         {{ translate('Default Percentage (%)') }}
                                         <span class="form-label-secondary" data-toggle="tooltip" data-placement="right"
-                                              data-original-title="{{ translate('Default percentage of order amount credited to the employee wallet. Overridable per store.') }}">
+                                              data-original-title="{{ translate('Default percentage of order amount. Stores can override this.') }}">
                                             <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
                                         </span>
                                     </label>
@@ -392,13 +395,14 @@
                                 </div>
                             </div>
 
-                            <div class="col-lg-4 col-sm-6 global-earning-pct-section {{ $global_earning_type != 'percentage' ? 'd-none' : '' }}">
+                            {{-- Default Cap (shown when percentage is checked) --}}
+                            <div class="col-lg-4 col-sm-6 global-earning-pct-section {{ !in_array('percentage', $enabled_types) ? 'd-none' : '' }}">
                                 <div class="form-group mb-0">
                                     <label class="input-label text-capitalize" for="employee_earning_cap">
                                         {{ translate('Default Maximum Cap') }}
                                         ({{ \App\CentralLogics\Helpers::currency_symbol() }})
                                         <span class="form-label-secondary" data-toggle="tooltip" data-placement="right"
-                                              data-original-title="{{ translate('Maximum earning per order regardless of percentage. Leave blank for no cap.') }}">
+                                              data-original-title="{{ translate('Max earning per order regardless of percentage. Optional.') }}">
                                             <img src="{{ asset('/public/assets/admin/img/info-circle.svg') }}" alt="">
                                         </span>
                                     </label>
@@ -727,17 +731,20 @@
 <script>
     "use strict";
     $(document).ready(function () {
-        $('input[name="employee_earning_type"]').on('change', function () {
-            var val = $(this).val();
-            if (val === 'fixed') {
-                $('.global-earning-fixed-section').removeClass('d-none');
-                $('.global-earning-pct-section').addClass('d-none');
-            } else if (val === 'percentage') {
-                $('.global-earning-pct-section').removeClass('d-none');
-                $('.global-earning-fixed-section').addClass('d-none');
-            } else {
-                $('.global-earning-fixed-section, .global-earning-pct-section').addClass('d-none');
-            }
+        function syncGlobalEarningFields() {
+            $('#enable_fixed').is(':checked')
+                ? $('.global-earning-fixed-section').removeClass('d-none')
+                : $('.global-earning-fixed-section').addClass('d-none');
+
+            $('#enable_percentage').is(':checked')
+                ? $('.global-earning-pct-section').removeClass('d-none')
+                : $('.global-earning-pct-section').addClass('d-none');
+        }
+
+        $('.global-earning-checkbox').on('change', function () {
+            syncGlobalEarningFields();
+            // Highlight checked label
+            $(this).closest('label').toggleClass('border-primary', $(this).is(':checked'));
         });
     });
 </script>
