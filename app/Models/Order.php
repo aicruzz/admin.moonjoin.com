@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use App\Traits\ReportFilter;
 use Modules\TaxModule\Entities\OrderTax;
+use App\Models\VendorEmployee;
 
 class Order extends Model
 {
@@ -46,6 +47,8 @@ class Order extends Model
         'is_guest' => 'boolean',
         'ref_bonus_amount' => 'float',
         'bring_change_amount'=>'integer',
+        'assigned_employee_id' => 'integer',
+        'locked_employee_id' => 'integer',
     ];
 
     protected $appends = ['module_type','order_attachment_full_url','order_proof_full_url'];
@@ -127,6 +130,16 @@ class Order extends Model
     public function delivery_man()
     {
         return $this->belongsTo(DeliveryMan::class, 'delivery_man_id');
+    }
+
+    public function assigned_employee()
+    {
+        return $this->belongsTo(VendorEmployee::class, 'assigned_employee_id');
+    }
+
+    public function locked_employee()
+    {
+        return $this->belongsTo(VendorEmployee::class, 'locked_employee_id');
     }
 
     public function customer()

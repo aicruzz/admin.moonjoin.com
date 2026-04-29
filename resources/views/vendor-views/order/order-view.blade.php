@@ -911,8 +911,38 @@
                                         </div>
                                     @endif
                                 </div>
+                                    @php
+                                        $currentEmployeeId = auth('vendor_employee')->check() ? auth('vendor_employee')->user()->id : null;
+                                        $isEmployee = (bool) $currentEmployeeId;
+                                        $isAssignedToMe = $isEmployee && $order->assigned_employee_id == $currentEmployeeId;
+                                        $isLockedToMe = $isEmployee && $order->locked_employee_id == $currentEmployeeId;
+                                        $isAssignedToOther = $order->assigned_employee_id && !$isAssignedToMe;
+                                        $canCook = !$isEmployee || $isAssignedToMe || !$order->assigned_employee_id;
+                                    @endphp
+
+                                    {{-- Assign button for confirmed orders (employees only) --}}
+                                    @if ($isEmployee && in_array($order->order_status, ['confirmed', 'accepted']))
+                                        @if ($isAssignedToMe)
+                                            <div class="alert alert-success py-2 mb-2 text-center">
+                                                <i class="tio-checkmark-circle"></i> {{ translate('Assigned to you — proceed to cooking to lock it in.') }}
+                                            </div>
+                                        @elseif ($isAssignedToOther)
+                                            <div class="alert alert-warning py-2 mb-2 text-center">
+                                                <i class="tio-warning"></i> {{ translate('Assigned to another employee.') }}
+                                            </div>
+                                        @else
+                                            <form action="{{ route('vendor.order.assign') }}" method="POST" class="mb-2">
+                                                @csrf
+                                                <input type="hidden" name="id" value="{{ $order->id }}">
+                                                <button type="submit" class="btn btn-outline-primary w-100">
+                                                    <i class="tio-user-add"></i> {{ translate('Assign to Me') }}
+                                                </button>
+                                            </form>
+                                        @endif
+                                    @endif
+
                                     @if ($order->store && $order->store->module->module_type == 'food')
-                                        <a class="btn btn--primary w-100 order-status-change-alert {{ $order['order_status'] == 'confirmed' || $order['order_status'] == 'accepted' ? '' : 'd-none' }}"
+                                        <a class="btn btn--primary w-100 order-status-change-alert {{ in_array($order['order_status'], ['confirmed', 'accepted']) ? '' : 'd-none' }} {{ !$canCook ? 'disabled' : '' }}"
 
                                            data-url="{{ route('vendor.order.status', ['id' => $order['id'], 'order_status' => 'processing']) }}"
                                            data-message="{{ translate('Change status to cooking ?') }}"
@@ -920,15 +950,68 @@
                                            data-processing-time="{{ $max_processing_time }}"
                                            href="javascript:">{{ translate('messages.proceed_for_processing') }}</a>
                                     @else
-                                    <a class="btn btn--primary w-100 route-alert  {{ $order['order_status'] == 'confirmed' || $order['order_status'] == 'accepted' ? '' : 'd-none' }}"
+                                    <a class="btn btn--primary w-100 route-alert  {{ in_array($order['order_status'], ['confirmed', 'accepted']) ? '' : 'd-none' }} {{ !$canCook ? 'disabled' : '' }}"
                                        data-url="{{ route('vendor.order.status', ['id' => $order['id'], 'order_status' => 'processing']) }}"
                                        data-message="{{ translate('messages.proceed_for_processing') }}"
                                     href="javascript:">{{ translate('messages.proceed_for_processing') }}</a>
                                     @endif
-                                <a class="btn btn--primary w-100 route-alert {{ $order['order_status'] == 'processing' ? '' : 'd-none' }}"
-                                   data-url="{{ route('vendor.order.status', ['id' => $order['id'], 'order_status' => 'handover']) }}"
-                                   data-message="{{ translate('messages.make_ready_for_handover') }}"
-                                    href="javascript:">{{ translate('messages.make_ready_for_handover') }}</a>
+
+                                    {{-- Claim + Pay section (processing status only) --}}
+                                    @if ($order['order_status'] == 'processing')
+                                        <div class="mt-3 mb-1">
+                                            <div class="alert alert-warning py-2 text-center fz--13">
+                                                <i class="tio-warning"></i>
+                                                <strong>{{ translate('Only click these buttons when you are sure all items are available or after adjusting the cart.') }}</strong>
+                                            </div>
+
+                                            {{-- Claim Button --}}
+                                            @if ($order->claim_status === 'claimed')
+                                                <button class="btn btn--success w-100 mb-2" disabled>
+                                                    <i class="tio-checkmark-circle"></i> {{ translate('Funds Claimed') }}
+                                                </button>
+                                            @else
+                                                <form action="{{ route('vendor.order.claim-funds') }}" method="POST" class="mb-2">
+                                                    @csrf
+                                                    <input type="hidden" name="id" value="{{ $order->id }}">
+                                                    <button type="submit" class="btn btn--primary w-100"
+                                                        onclick="return confirm('{{ translate('Transfer order funds to your wallet?') }}')">
+                                                        <i class="tio-money"></i> {{ translate('Claim Funds') }}
+                                                    </button>
+                                                </form>
+                                            @endif
+
+                                            {{-- Pay Button --}}
+                                            @if ($order->pay_status === 'paid')
+                                                <button class="btn btn--success w-100 mb-2" disabled>
+                                                    <i class="tio-checkmark-circle"></i> {{ translate('Payout Done') }}
+                                                </button>
+                                            @else
+                                                <form action="{{ route('vendor.order.pay-payout') }}" method="POST" class="mb-2">
+                                                    @csrf
+                                                    <input type="hidden" name="id" value="{{ $order->id }}">
+                                                    <button type="submit"
+                                                        class="btn w-100 {{ $order->claim_status === 'claimed' ? 'btn--primary' : 'btn--secondary' }}"
+                                                        {{ $order->claim_status !== 'claimed' ? 'disabled' : '' }}
+                                                        onclick="return confirm('{{ translate('Send funds to your saved payout account?') }}')">
+                                                        <i class="tio-arrow-large-right"></i> {{ translate('Pay to Payout Account') }}
+                                                    </button>
+                                                </form>
+                                            @endif
+                                        </div>
+                                    @endif
+
+                                    {{-- Handover button: blocked unless claim+pay both done --}}
+                                    @php($readyForHandover = $order->claim_status === 'claimed' && $order->pay_status === 'paid')
+                                    @if ($order['order_status'] == 'processing' && !$readyForHandover)
+                                        <button class="btn btn--secondary w-100" disabled title="{{ translate('Complete Claim and Pay steps first.') }}">
+                                            {{ translate('messages.make_ready_for_handover') }}
+                                        </button>
+                                    @else
+                                        <a class="btn btn--primary w-100 route-alert {{ $order['order_status'] == 'processing' ? '' : 'd-none' }}"
+                                           data-url="{{ route('vendor.order.status', ['id' => $order['id'], 'order_status' => 'handover']) }}"
+                                           data-message="{{ translate('messages.make_ready_for_handover') }}"
+                                            href="javascript:">{{ translate('messages.make_ready_for_handover') }}</a>
+                                    @endif
                                  @if($order['order_status'] == 'handover'|| ($order['order_status'] == 'picked_up' && $order->store->sub_self_delivery == 1))
                                     <a class="btn  w-100
                                     {{ ($order['order_type'] == 'take_away' || $order->store->sub_self_delivery == 1)  ?  'btn--primary order-status-change-alert'  :  'btn--secondary  self-delivery-warning' }} "

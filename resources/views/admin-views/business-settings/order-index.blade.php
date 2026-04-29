@@ -264,6 +264,27 @@
                                 </div>
 
                                 <div class="col-sm-6 col-lg-4 mt-4 mb-4 access_product_approval">
+                                    @php($max_active_orders = \App\Models\BusinessSetting::where('key', 'max_active_orders_per_employee')->first())
+                                    @php($max_active_orders_val = $max_active_orders ? (int)$max_active_orders->value : 0)
+                                    <div class="form-group mb-0">
+                                        <label class="input-label text-capitalize d-flex align-items-center">
+                                            <span class="line--limit-1">
+                                                {{ translate('Max Active Orders Per Employee') }}
+                                                <span class="form-label-secondary" data-toggle="tooltip"
+                                                    data-placement="right"
+                                                    data-original-title="{{ translate('Maximum number of simultaneous active orders a vendor employee can handle. Set to 0 for unlimited.') }}">
+                                                    <img src="{{ asset('public/assets/admin/img/info-circle.svg') }}" alt="">
+                                                </span>
+                                            </span>
+                                        </label>
+                                        <input type="number" class="form-control h--45px"
+                                            name="max_active_orders_per_employee"
+                                            value="{{ $max_active_orders_val }}"
+                                            min="0" placeholder="{{ translate('0 = unlimited') }}">
+                                    </div>
+                                </div>
+
+                                <div class="col-sm-6 col-lg-4 mt-4 mb-4 access_product_approval">
                                     @php($admin_order_notification = \App\Models\BusinessSetting::where('key', 'admin_order_notification')->first())
                                     @php($admin_order_notification = $admin_order_notification ? $admin_order_notification->value : 0)
                                     <div class="form-group mb-0">

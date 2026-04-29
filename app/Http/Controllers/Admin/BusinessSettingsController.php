@@ -379,6 +379,10 @@ class BusinessSettingsController extends Controller
             'value' => $request['admin_free_delivery_status'] && $request['admin_free_delivery_option'] ? $request['admin_free_delivery_option'] : null,
         ]);
 
+        Helpers::businessUpdateOrInsert(['key' => 'max_active_orders_per_employee'], [
+            'value' => (int) ($request['max_active_orders_per_employee'] ?? 0),
+        ]);
+
         Toastr::success(translate('messages.successfully_updated_to_changes_restart_app'));
 
         return back();

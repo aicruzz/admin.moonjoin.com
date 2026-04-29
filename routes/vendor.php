@@ -268,6 +268,9 @@ Route::group(['namespace' => 'Vendor', 'as' => 'vendor.'], function () {
             Route::get('export-orders/{file_type}/{status}/{type}', 'OrderController@export_orders')->name('export');
 
             Route::post('{id}/mark-unavailable', 'OrderController@markUnavailableItems')->name('mark-unavailable');
+            Route::post('assign', 'OrderController@assign_order')->name('assign');
+            Route::post('claim-funds', 'OrderController@claim_order_funds')->name('claim-funds');
+            Route::post('pay-payout', 'OrderController@pay_vendor_payout')->name('pay-payout');
         });
 
         Route::group(['prefix' => 'business-settings', 'as' => 'business-settings.'], function () {

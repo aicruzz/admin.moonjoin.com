@@ -25,6 +25,10 @@ use App\Http\Controllers\Controller;
 use Brian2694\Toastr\Facades\Toastr;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Models\User;
+use App\Models\StoreWallet;
+use App\Models\VendorEmployee;
+use App\Models\DisbursementWithdrawalMethod;
+use App\Models\WithdrawRequest;
 
 
 class OrderController extends Controller
@@ -320,6 +324,45 @@ class OrderController extends Controller
         if ($request['order_status'] == 'delivered' && $order->order_type != 'take_away' && !Helpers::get_store_data()->sub_self_delivery) {
             Toastr::warning(translate('messages.you_can_not_delivered_delivery_order'));
             return back();
+        }
+
+        // Enforce claim + pay before handover
+        if ($request['order_status'] == 'handover') {
+            if ($order->claim_status !== 'claimed') {
+                Toastr::warning(translate('Please claim order funds before marking ready for handover.'));
+                return back();
+            }
+            if ($order->pay_status !== 'paid') {
+                Toastr::warning(translate('Please complete the payout before marking ready for handover.'));
+                return back();
+            }
+        }
+
+        // Enforce assignment and max active orders before cooking
+        if ($request['order_status'] == 'processing' && auth('vendor_employee')->check()) {
+            $employee = auth('vendor_employee')->user();
+
+            // Block if another employee has the soft assignment
+            if ($order->assigned_employee_id && $order->assigned_employee_id != $employee->id) {
+                Toastr::warning(translate('This order is assigned to another employee. Ask them to release it first.'));
+                return back();
+            }
+
+            // Check max active orders limit
+            $maxActive = (int) (BusinessSetting::where('key', 'max_active_orders_per_employee')->first()?->value ?? 0);
+            if ($maxActive > 0) {
+                $activeCount = Order::where('locked_employee_id', $employee->id)
+                    ->whereIn('order_status', ['processing', 'handover'])
+                    ->count();
+                if ($activeCount >= $maxActive) {
+                    Toastr::warning(translate('You have reached your maximum active order limit (' . $maxActive . '). Complete an existing order first.'));
+                    return back();
+                }
+            }
+
+            // Lock the order to this employee
+            $order->locked_employee_id = $employee->id;
+            $order->assigned_employee_id = $employee->id;
         }
 
         if ($request['order_status'] == "confirmed") {
@@ -1595,5 +1638,151 @@ class OrderController extends Controller
 
         Toastr::success(translate('messages.customer_notified_to_edit_order'));
         return redirect(url('vendor-panel/order/details/' . $order->id));
+    }
+
+    public function assign_order(Request $request)
+    {
+        $request->validate(['id' => 'required|integer']);
+
+        $order = Order::where(['id' => $request->id, 'store_id' => Helpers::get_store_id()])->first();
+
+        if (!$order) {
+            Toastr::error(translate('messages.Order_not_found'));
+            return back();
+        }
+
+        if (!in_array($order->order_status, ['confirmed', 'accepted'])) {
+            Toastr::warning(translate('Only confirmed orders can be assigned.'));
+            return back();
+        }
+
+        if (!auth('vendor_employee')->check()) {
+            Toastr::warning(translate('Only vendor employees can assign orders.'));
+            return back();
+        }
+
+        $employee = auth('vendor_employee')->user();
+        $order->assigned_employee_id = $employee->id;
+        $order->save();
+
+        Toastr::success(translate('Order assigned to you. Proceed to cooking to lock it in.'));
+        return back();
+    }
+
+    public function claim_order_funds(Request $request)
+    {
+        $request->validate(['id' => 'required|integer']);
+
+        $order = Order::where(['id' => $request->id, 'store_id' => Helpers::get_store_id()])
+            ->with('transaction')
+            ->first();
+
+        if (!$order) {
+            Toastr::error(translate('messages.Order_not_found'));
+            return back();
+        }
+
+        if ($order->order_status !== 'processing') {
+            Toastr::warning(translate('Order must be in cooking/processing status to claim funds.'));
+            return back();
+        }
+
+        if ($order->claim_status === 'claimed') {
+            Toastr::warning(translate('Funds already claimed for this order.'));
+            return back();
+        }
+
+        // Create the order transaction (credits vendor wallet)
+        if ($order->transaction === null) {
+            $unpaid_payment = OrderPayment::where('payment_status', 'unpaid')->where('order_id', $order->id)->first()?->payment_method;
+            $unpaid_pay_method = $unpaid_payment ?? 'digital_payment';
+
+            if ($order->payment_method == 'cash_on_delivery' || $unpaid_pay_method == 'cash_on_delivery') {
+                $ol = OrderLogic::create_transaction($order, 'store', null);
+            } else {
+                $ol = OrderLogic::create_transaction($order, 'admin', null);
+            }
+
+            if (!$ol) {
+                Toastr::error(translate('Failed to create order transaction. Please try again.'));
+                return back();
+            }
+        }
+
+        $order->claim_status = 'claimed';
+        $order->save();
+
+        Toastr::success(translate('Order funds claimed successfully.'));
+        return back();
+    }
+
+    public function pay_vendor_payout(Request $request)
+    {
+        $request->validate(['id' => 'required|integer']);
+
+        $order = Order::where(['id' => $request->id, 'store_id' => Helpers::get_store_id()])
+            ->with('transaction')
+            ->first();
+
+        if (!$order) {
+            Toastr::error(translate('messages.Order_not_found'));
+            return back();
+        }
+
+        if ($order->claim_status !== 'claimed') {
+            Toastr::warning(translate('Please claim order funds before requesting payout.'));
+            return back();
+        }
+
+        if ($order->pay_status === 'paid') {
+            Toastr::warning(translate('Payout already requested for this order.'));
+            return back();
+        }
+
+        $store_amount = (float) ($order->transaction?->store_amount ?? 0);
+        if ($store_amount <= 0) {
+            Toastr::error(translate('Invalid payout amount. Please ensure funds are claimed first.'));
+            return back();
+        }
+
+        // Get vendor's default saved payout account
+        $disbursementMethod = DisbursementWithdrawalMethod::where('store_id', Helpers::get_store_id())
+            ->where('is_default', 1)
+            ->first();
+
+        if (!$disbursementMethod) {
+            Toastr::error(translate('No default payout account found. Please set up a withdrawal method in your wallet settings.'));
+            return back();
+        }
+
+        $wallet = StoreWallet::where('vendor_id', Helpers::get_vendor_id())->first();
+
+        if (!$wallet || $wallet->balance < $store_amount) {
+            Toastr::error(translate('Insufficient wallet balance for payout.'));
+            return back();
+        }
+
+        DB::transaction(function () use ($wallet, $order, $store_amount, $disbursementMethod) {
+            $wallet->lockForUpdate()->first();
+
+            DB::table('withdraw_requests')->insert([
+                'vendor_id'                => Helpers::get_vendor_id(),
+                'amount'                   => $store_amount,
+                'transaction_note'         => 'Order #' . $order->id . ' payout',
+                'withdrawal_method_id'     => $disbursementMethod->withdrawal_method_id,
+                'withdrawal_method_fields' => $disbursementMethod->withdrawal_method_fields ?? '{}',
+                'approved'                 => 0,
+                'created_at'               => now(),
+                'updated_at'               => now(),
+            ]);
+
+            $wallet->increment('pending_withdraw', $store_amount);
+
+            $order->pay_status = 'paid';
+            $order->save();
+        });
+
+        Toastr::success(translate('Payout requested successfully.'));
+        return back();
     }
 }
