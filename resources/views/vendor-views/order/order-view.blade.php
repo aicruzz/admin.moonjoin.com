@@ -915,9 +915,10 @@
                                         $currentEmployeeId = auth('vendor_employee')->check() ? auth('vendor_employee')->user()->id : null;
                                         $isEmployee = (bool) $currentEmployeeId;
                                         $isAssignedToMe = $isEmployee && $order->assigned_employee_id == $currentEmployeeId;
-                                        $isLockedToMe = $isEmployee && $order->locked_employee_id == $currentEmployeeId;
                                         $isAssignedToOther = $order->assigned_employee_id && !$isAssignedToMe;
                                         $canCook = !$isEmployee || $isAssignedToMe || !$order->assigned_employee_id;
+                                        $readyForHandover = $order->claim_status === 'claimed' && $order->pay_status === 'paid';
+                                        $isFood = $order->store && $order->store->module->module_type == 'food';
                                     @endphp
 
                                     {{-- Assign button for confirmed orders (employees only) --}}
@@ -941,19 +942,28 @@
                                         @endif
                                     @endif
 
-                                    @if ($order->store && $order->store->module->module_type == 'food')
-                                        <a class="btn btn--primary w-100 order-status-change-alert {{ in_array($order['order_status'], ['confirmed', 'accepted']) ? '' : 'd-none' }} {{ !$canCook ? 'disabled' : '' }}"
-
-                                           data-url="{{ route('vendor.order.status', ['id' => $order['id'], 'order_status' => 'processing']) }}"
-                                           data-message="{{ translate('Change status to cooking ?') }}"
-                                           data-verification="false"
-                                           data-processing-time="{{ $max_processing_time }}"
-                                           href="javascript:">{{ translate('messages.proceed_for_processing') }}</a>
-                                    @else
-                                    <a class="btn btn--primary w-100 route-alert  {{ in_array($order['order_status'], ['confirmed', 'accepted']) ? '' : 'd-none' }} {{ !$canCook ? 'disabled' : '' }}"
-                                       data-url="{{ route('vendor.order.status', ['id' => $order['id'], 'order_status' => 'processing']) }}"
-                                       data-message="{{ translate('messages.proceed_for_processing') }}"
-                                    href="javascript:">{{ translate('messages.proceed_for_processing') }}</a>
+                                    {{-- Proceed to Cooking button --}}
+                                    @if (in_array($order['order_status'], ['confirmed', 'accepted']))
+                                        @if ($canCook)
+                                            @if ($isFood)
+                                                <a class="btn btn--primary w-100 order-status-change-alert"
+                                                   data-url="{{ route('vendor.order.status', ['id' => $order['id'], 'order_status' => 'processing']) }}"
+                                                   data-message="{{ translate('Change status to cooking ?') }}"
+                                                   data-verification="false"
+                                                   data-processing-time="{{ $max_processing_time }}"
+                                                   href="javascript:">{{ translate('messages.proceed_for_processing') }}</a>
+                                            @else
+                                                <a class="btn btn--primary w-100 route-alert"
+                                                   data-url="{{ route('vendor.order.status', ['id' => $order['id'], 'order_status' => 'processing']) }}"
+                                                   data-message="{{ translate('messages.proceed_for_processing') }}"
+                                                   href="javascript:">{{ translate('messages.proceed_for_processing') }}</a>
+                                            @endif
+                                        @else
+                                            <button type="button" class="btn btn--secondary w-100" disabled
+                                                title="{{ translate('Order is assigned to another employee.') }}">
+                                                {{ translate('messages.proceed_for_processing') }}
+                                            </button>
+                                        @endif
                                     @endif
 
                                     {{-- Claim + Pay section (processing status only) --}}
@@ -966,7 +976,7 @@
 
                                             {{-- Claim Button --}}
                                             @if ($order->claim_status === 'claimed')
-                                                <button class="btn btn--success w-100 mb-2" disabled>
+                                                <button type="button" class="btn btn--success w-100 mb-2" disabled>
                                                     <i class="tio-checkmark-circle"></i> {{ translate('Funds Claimed') }}
                                                 </button>
                                             @else
@@ -982,7 +992,7 @@
 
                                             {{-- Pay Button --}}
                                             @if ($order->pay_status === 'paid')
-                                                <button class="btn btn--success w-100 mb-2" disabled>
+                                                <button type="button" class="btn btn--success w-100 mb-2" disabled>
                                                     <i class="tio-checkmark-circle"></i> {{ translate('Payout Done') }}
                                                 </button>
                                             @else
@@ -1001,16 +1011,18 @@
                                     @endif
 
                                     {{-- Handover button: blocked unless claim+pay both done --}}
-                                    @php($readyForHandover = $order->claim_status === 'claimed' && $order->pay_status === 'paid')
-                                    @if ($order['order_status'] == 'processing' && !$readyForHandover)
-                                        <button class="btn btn--secondary w-100" disabled title="{{ translate('Complete Claim and Pay steps first.') }}">
-                                            {{ translate('messages.make_ready_for_handover') }}
-                                        </button>
-                                    @else
-                                        <a class="btn btn--primary w-100 route-alert {{ $order['order_status'] == 'processing' ? '' : 'd-none' }}"
-                                           data-url="{{ route('vendor.order.status', ['id' => $order['id'], 'order_status' => 'handover']) }}"
-                                           data-message="{{ translate('messages.make_ready_for_handover') }}"
-                                            href="javascript:">{{ translate('messages.make_ready_for_handover') }}</a>
+                                    @if ($order['order_status'] == 'processing')
+                                        @if ($readyForHandover)
+                                            <a class="btn btn--primary w-100 route-alert"
+                                               data-url="{{ route('vendor.order.status', ['id' => $order['id'], 'order_status' => 'handover']) }}"
+                                               data-message="{{ translate('messages.make_ready_for_handover') }}"
+                                               href="javascript:">{{ translate('messages.make_ready_for_handover') }}</a>
+                                        @else
+                                            <button type="button" class="btn btn--secondary w-100" disabled
+                                                title="{{ translate('Complete Claim and Pay steps first.') }}">
+                                                {{ translate('messages.make_ready_for_handover') }}
+                                            </button>
+                                        @endif
                                     @endif
                                  @if($order['order_status'] == 'handover'|| ($order['order_status'] == 'picked_up' && $order->store->sub_self_delivery == 1))
                                     <a class="btn  w-100
