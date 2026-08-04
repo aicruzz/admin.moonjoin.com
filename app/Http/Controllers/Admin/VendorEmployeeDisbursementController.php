@@ -11,8 +11,10 @@ use App\Models\VendorEmployeeWallet;
 use App\Models\Disbursement;
 use App\Models\DisbursementDetails;
 use App\Models\WithdrawRequest;
+use App\Services\Disbursement\DisbursementPayoutService;
 use Brian2694\Toastr\Facades\Toastr;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\View;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -236,9 +238,14 @@ class VendorEmployeeDisbursementController extends Controller
      */
     public function generate_disbursement()
     {
-        $vendor_employees = VendorEmployee::where('status', 1)->get();
-        $disbursement_details = [];
-        $total_amount = 0;
+        $type = BusinessSetting::where('key', 've_disbursement_type')->first()?->value ?? 'manual';
+        if ($type !== 'automated') {
+            Log::info('VE auto-disbursement skipped — type is not automated', ['type' => $type]);
+            return true;
+        }
+
+        $payoutService = app(DisbursementPayoutService::class);
+        $minimum_amount = BusinessSetting::where('key', 've_disbursement_min_amount')->first()?->value ?? 0;
 
         $disbursement = new Disbursement();
         $disbursement->id = 1000 + Disbursement::count() + 1;
@@ -246,44 +253,97 @@ class VendorEmployeeDisbursementController extends Controller
             $disbursement->id = Disbursement::orderBy('id', 'desc')->first()->id + 1;
         }
         $disbursement->title = 'Disbursement # ' . $disbursement->id;
-        $minimum_amount = BusinessSetting::where(['key' => 've_disbursement_min_amount'])->first()?->value;
+        $disbursement->created_for = 'vendor_employee';
+        $disbursement->total_amount = 0;
+        $disbursement->save();
 
+        $total_amount = 0;
+        $any_row = false;
+
+        $vendor_employees = VendorEmployee::where('status', 1)->get();
         foreach ($vendor_employees as $ve) {
-            if (isset($ve->wallet)) {
-                $total_earning = $ve->wallet->total_earning ?? 0;
-                $total_withdraw = ($ve->wallet->total_withdrawn ?? 0) + ($ve->wallet->pending_withdraw ?? 0);
-                $total_cash_in_hand = $ve->wallet->collected_cash ?? 0;
+            $wallet = $ve->wallet;
+            if (!$wallet || !isset($ve->disbursement_method)) {
+                continue;
+            }
 
-                $disbursement_amount = ((string) $total_earning > (string) ($total_withdraw + $total_cash_in_hand))
-                    ? ($total_earning - ($total_withdraw + $total_cash_in_hand))
-                    : 0;
+            $total_earning = $wallet->total_earning ?? 0;
+            $total_withdraw = ($wallet->total_withdrawn ?? 0) + ($wallet->pending_withdraw ?? 0);
+            $total_cash_in_hand = $wallet->collected_cash ?? 0;
+            $disbursement_amount = ((string) $total_earning > (string) ($total_withdraw + $total_cash_in_hand))
+                ? ($total_earning - ($total_withdraw + $total_cash_in_hand))
+                : 0;
 
-                if ($disbursement_amount > $minimum_amount && isset($ve->disbursement_method)) {
-                    $disbursement_details[] = [
-                        'disbursement_id' => $disbursement->id,
-                        'vendor_employee_id' => $ve->id,
-                        'disbursement_amount' => $disbursement_amount,
-                        'payment_method' => $ve->disbursement_method->id,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ];
-                    $total_amount += $disbursement_amount;
+            if ($disbursement_amount <= $minimum_amount) {
+                continue;
+            }
 
-                    $ve->wallet->pending_withdraw += $disbursement_amount;
-                    $ve->wallet->save();
-                }
+            $any_row = true;
+            $method = $ve->disbursement_method;
+
+            $detail = new DisbursementDetails();
+            $detail->disbursement_id = $disbursement->id;
+            $detail->vendor_employee_id = $ve->id;
+            $detail->disbursement_amount = $disbursement_amount;
+            $detail->payment_method = $method->id;
+            $detail->status = 'pending';
+            $detail->save();
+
+            $wallet->increment('pending_withdraw', $disbursement_amount);
+            $total_amount += $disbursement_amount;
+
+            $methodFields = is_array($method->method_fields)
+                ? $method->method_fields
+                : (json_decode($method->method_fields, true) ?? []);
+
+            $result = $payoutService->payout(
+                amount: (float) $disbursement_amount,
+                methodName: $method->method_name,
+                methodFields: $methodFields,
+                narration: 'Vendor Employee Disbursement #' . $disbursement->id,
+            );
+
+            if ($result['success']) {
+                $wallet->decrement('pending_withdraw', $disbursement_amount);
+                $wallet->increment('total_withdrawn', $disbursement_amount);
+
+                $withdraw = new WithdrawRequest();
+                $withdraw->vendor_employee_id = $ve->id;
+                $withdraw->amount = $disbursement_amount;
+                $withdraw->withdrawal_method_id = $method->id;
+                $withdraw->withdrawal_method_fields = $method->method_fields;
+                $withdraw->approved = 1;
+                $withdraw->transaction_note = $detail->id;
+                $withdraw->type = 'disbursement';
+                $withdraw->save();
+
+                $detail->status = 'completed';
+                $detail->transaction_note = 'Auto-paid via 9PSB to ' . ($result['account_name'] ?? '')
+                    . ' (' . ($result['bank_name'] ?? '') . ')';
+                $detail->save();
+            } else {
+                $detail->transaction_note = '9PSB failed: ' . ($result['message'] ?? 'unknown');
+                $detail->save();
+                Log::warning('VE auto-disbursement payout failed', [
+                    'detail_id' => $detail->id,
+                    'vendor_employee_id' => $ve->id,
+                    'amount' => $disbursement_amount,
+                    'message' => $result['message'] ?? null,
+                ]);
             }
         }
 
-        if ($total_amount > 0) {
-            $disbursement->total_amount = $total_amount;
-            $disbursement->created_for = 'vendor_employee';
-            $disbursement->save();
-
-            DisbursementDetails::insert($disbursement_details);
+        if (!$any_row) {
+            $disbursement->delete();
+            Log::info('VE auto-disbursement: no eligible recipients, parent removed');
+            return true;
         }
 
-        info("VE-----Disbursement");
+        $disbursement->total_amount = $total_amount;
+        $disbursement->save();
+        self::check_status($disbursement->id);
+
+        Log::info('VE auto-disbursement completed', ['disbursement_id' => $disbursement->id, 'total' => $total_amount]);
         return true;
     }
 

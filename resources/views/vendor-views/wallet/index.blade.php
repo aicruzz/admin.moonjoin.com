@@ -84,13 +84,22 @@
                                                     </button>
 
                                                 </div>
-                                                <div class="modal-body">
-                                                    <div class="form-group">
-                                                        @foreach(json_decode($wr->withdrawal_method_fields, true) as $key=>$method_field)
-                                                            <label class="mt-2"  for="{{$key}}">{{ translate($key)}}</label>
-                                                            <input type="text" class="form-control" readonly value="{{ $method_field }}" id="{{$key}}">
-                                                        @endforeach
-                                                    </div>
+                                                @php
+                                                $fields = json_decode($wr->withdrawal_method_fields, true);
+                                                @endphp
+                                                <div class="form-group">
+                                                    <label class="mt-2">{{ translate('messages.bank_name') }}</label>
+                                                    <input type="text" class="form-control"
+                                                        value="{{ $fields['bank_name'] ?? '-' }}"
+                                                        readonly>
+                                                    <label class="mt-2">{{ translate('messages.account_number') }}</label>
+                                                    <input type="text" class="form-control"
+                                                        value="{{ $fields['account_number'] ?? '-' }}"
+                                                        readonly>
+                                                    <label class="mt-2">{{ translate('messages.account_name') }}</label>
+                                                    <input type="text" class="form-control"
+                                                        value="{{ $fields['account_name'] ?? '-' }}"
+                                                        readonly>
                                                 </div>
                                                 <div class="modal-footer">
                                                     <button id="reset_btn" type="reset" data-dismiss="modal" class="btn btn-secondary" >{{ translate('Close') }} </button>
@@ -249,56 +258,126 @@
 @endsection
 @push('script_2')
     <script src="{{asset('public/assets/admin')}}/js/view-pages/vendor/wallet-method.js"></script>
-    <script>
-        "use strict";
-$('#withdraw_method').on('change', function () {
-    $('#submit_button').attr("disabled","true");
-    let method_id = this.value;
 
-    // Set header if need any otherwise remove setup part
-    $.ajaxSetup({
-        headers: {
-            'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
-        }
-    });
-    $.ajax({
-        url: "{{route('vendor.wallet.method-list')}}" + "?method_id=" + method_id,
-        data: {},
-        processData: false,
-        contentType: false,
-        type: 'get',
-        success: function (response) {
-            $('#submit_button').removeAttr('disabled');
-            let method_fields = response.content.method_fields;
-            $("#method-filed__div").html("");
-            method_fields.forEach((element, index) => {
-                $("#method-filed__div").append(`
-                    <div class="form-group mt-2">
-                        <label for="wr_num" class="fz-16 text-capitalize c1 mb-2">${element.input_name.replaceAll('_', ' ')}</label>
-                        <input type="${element.input_type == 'phone' ? 'number' : element.input_type  }" class="form-control" name="${element.input_name}" placeholder="${element.placeholder}" ${element.is_required === 1 ? 'required' : ''}>
-                    </div>
-                `);
-            })
+<script>
+    "use strict";
 
-        },
-        error: function () {
+    $('#withdraw_method').on('change', function () {
+        $('#submit_button').attr("disabled", "true");
+        let method_id = this.value;
 
-        }
-    });
-});
-
-$('.payment-warning').on('click',function (event ){
-            event.preventDefault();
-            toastr.info(
-                "{{ translate('messages.Currently,_there_are_no_payment_options_available._Please_contact_admin_regarding_any_payment_process_or_queries.') }}", {
-                    CloseButton: true,
-                    ProgressBar: true
-                });
+        $.ajaxSetup({
+            headers: {
+                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+            }
         });
-$(document).ready(function() {
-    $("#withdraw_form").on("submit", function(event) {
-        $('#set_disable').attr('disabled', true);
+        $.ajax({
+            url: "{{route('vendor.wallet.method-list')}}" + "?method_id=" + method_id,
+            data: {},
+            processData: false,
+            contentType: false,
+            type: 'get',
+            success: function (response) {
+                $('#submit_button').removeAttr('disabled');
+                let method_fields = response.content.method_fields;
+                $("#method-filed__div").html("");
+                
+                method_fields.forEach((element, index) => {
+                    let fieldHTML = "";
+
+                    // Account Number field with built-in layout validation button
+                    if (element.input_name === 'account_number') {
+                        fieldHTML = `
+                            <div class="form-group mt-2">
+                                <label for="${element.input_name}" class="fz-16 text-capitalize c1 mb-2">${element.input_name.replaceAll('_', ' ')}</label>
+                                <div class="input-group">
+                                    <input type="${element.input_type == 'phone' ? 'number' : element.input_type}" class="form-control" id="account_number_field" name="${element.input_name}" placeholder="${element.placeholder}" ${element.is_required === 1 ? 'required' : ''}>
+                                    <div class="input-group-append">
+                                        <button type="button" class="btn btn-outline-primary" id="dynamic_verify_btn">{{ translate('Verify') }}</button>
+                                    </div>
+                                </div>
+                                <div id="dynamic_verify_result" class="small mt-1"></div>
+                            </div>
+                        `;
+                    } else {
+                        // Standard generation for any other fields that might be added later
+                        fieldHTML = `
+                            <div class="form-group mt-2">
+                                <label for="${element.input_name}" class="fz-16 text-capitalize c1 mb-2">${element.input_name.replaceAll('_', ' ')}</label>
+                                <input type="${element.input_type == 'phone' ? 'number' : element.input_type}" class="form-control" name="${element.input_name}" placeholder="${element.placeholder}" ${element.is_required === 1 ? 'required' : ''}>
+                            </div>
+                        `;
+                    }
+
+                    $("#method-filed__div").append(fieldHTML);
+                });
+
+            },
+            error: function () {
+                $('#submit_button').removeAttr('disabled');
+            }
+        });
     });
-});
-    </script>
+
+    // Verification engine interceptor
+    $(document).on('click', '#dynamic_verify_btn', function() {
+        let accountNumber = $("#account_number_field").val();
+        
+        // FIX: Grab the text (the bank name like 'Opay', 'Palmpay') from the selected option on top
+        let bankName = $('#withdraw_method option:selected').text().trim(); 
+        
+        let resultDiv = $('#dynamic_verify_result');
+        let button = $(this);
+
+        if (!accountNumber) {
+            resultDiv.html('<span class="text-danger">Please enter an account number first.</span>');
+            return;
+        }
+
+        if (!bankName || $('#withdraw_method').val() == "") {
+            resultDiv.html('<span class="text-danger">Please select a payment method/bank first.</span>');
+            return;
+        }
+
+        button.prop('disabled', true).text('Verifying...');
+        resultDiv.html('<span class="text-muted">Performing name enquiry...</span>');
+
+        $.ajax({
+            url: "{{ route('vendor.wallet.name-enquiry') }}",
+            type: "POST",
+            data: {
+                _token: "{{ csrf_token() }}",
+                accountNumber: accountNumber, 
+                bankCode: bankName // Passes the text name ('Opay') into your bankCode field parameters
+            },
+            success: function(response) {
+                button.prop('disabled', false).text('Verify');
+                
+                if (response.success && response.data) {
+                    let accountName = response.data.accountName;
+                    resultDiv.html(`<span class="text-success">✔ Verified: <strong>${accountName}</strong></span>`);
+                    
+                    // Auto-fill an account_name field if it exists in the form
+                    if ($("input[name='account_name']").length) {
+                        $("input[name='account_name']").val(accountName);
+                    }
+                } else {
+                    let errorMsg = response.message || 'Account could not be verified';
+                    resultDiv.html(`<span class="text-danger">❌ ${errorMsg}</span>`);
+                }
+            },
+            error: function(xhr) {
+                button.prop('disabled', false).text('Verify');
+                let parseErr = xhr.responseJSON ? (xhr.responseJSON.message || 'Error executing name enquiry.') : 'Error processing request.';
+                resultDiv.html(`<span class="text-danger">❌ ${parseErr}</span>`);
+            }
+        });
+    });
+
+    $(document).ready(function() {
+        $("form").on("submit", function(event) {
+            $('#set_disable').attr('disabled', true);
+        });
+    });
+</script>
 @endpush

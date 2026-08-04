@@ -64,14 +64,40 @@
                                 {{ translate('Reason') }}
                                 <span class="text-danger">*</span>
                             </label>
+
+                            @php
+                                $vendor_reasons = \App\Models\DebitStoreReason::where('status', 1)
+                                    ->latest()
+                                    ->get();
+                            @endphp
+
                             <select class="form-control" name="reason" id="reason" required>
                                 <option value="">-- {{ translate('Select reason') }} --</option>
-                                <option value="salary_deduction">{{ translate('Salary Deduction') }}</option>
-                                <option value="late_penalty">{{ translate('Late Penalty') }}</option>
-                                <option value="damage_or_loss">{{ translate('Damage / Item Loss') }}</option>
-                                <option value="cash_shortage">{{ translate('Cash Shortage') }}</option>
-                                <option value="other">{{ translate('Other') }}</option>
+
+                                @forelse ($vendor_reasons as $reason)
+                                    <option value="{{ $reason->id }}">
+                                        {{ $reason->reason }}
+                                    </option>
+                                @empty
+                                    <option value="" disabled>
+                                        {{ translate('No reasons configured. Please add them in Vendor Settings.') }}
+                                    </option>
+                                @endforelse
                             </select>
+
+                            @if ($vendor_reasons->isEmpty())
+                                <small class="text-warning d-block mt-1">
+                                    <i class="tio-warning-outlined"></i>
+
+                                    {{ translate('No active vendor debit store reasons found. Go to') }}
+
+                                    <a href="{{ route('admin.business-settings.order-index') }}" target="_blank">
+                                        {{ translate('Order Settings') }}
+                                    </a>
+
+                                    {{ translate('to add them.') }}
+                                </small>
+                            @endif
                         </div>
                     </div>
 

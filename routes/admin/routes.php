@@ -258,6 +258,12 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
                     Route::post('update/{id}', [SurgePriceController::class, 'update'])->name('update');
                     Route::delete('delete/{id}', [SurgePriceController::class, 'destroy'])->name('delete');
                 });
+
+                // Stage 3 — MoonJoin Cloud per-zone delivery pricing overrides
+                Route::group(['prefix' => 'mj-cloud-pricing', 'as' => 'mj-cloud-pricing.'], function () {
+                    Route::get('/{zone_id}', [\App\Http\Controllers\Admin\ZonePricingController::class, 'edit'])->name('edit');
+                    Route::post('/{zone_id}', [\App\Http\Controllers\Admin\ZonePricingController::class, 'update'])->name('update');
+                });
             });
 
             Route::group(['prefix' => 'module', 'as' => 'module.', 'middleware' => ['module:module']], function () {
@@ -273,16 +279,23 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
                 Route::get(Module::SHOW[URI] . '/{id}', [ModuleController::class, 'show'])->name('show')->withoutMiddleware('module:module');
             });
 
-            Route::post('debit-reasons/store', [BusinessSettingsController::class, 'debitReasonStore'])->name('debit-reasons.store');
-            Route::put('debit-reasons/update', [BusinessSettingsController::class, 'debitReasonUpdate'])->name('debit-reasons.update');
-            Route::get('debit-reasons/status/{id}/{status}', [BusinessSettingsController::class, 'debitReasonStatus'])->name('debit-reasons.status');
-            Route::delete('debit-reasons/{id}', [BusinessSettingsController::class, 'debitReasonDestroy'])->name('debit-reasons.destroy');
+    Route::post('debit-store-reasons/store', [BusinessSettingsController::class, 'debitStoreReasonStore'])
+        ->name('debit-store-reasons.store');
 
-            Route::post('debit-vendor-employee-reasons/store', [BusinessSettingsController::class, 'debitReasonStore'])->name('debit-vendor-employee-reasons.store');
-            Route::put('debit-vendor-employee-reasons/update', [BusinessSettingsController::class, 'debitReasonUpdate'])->name('debit-vendor-employee-reasons.update');
-            Route::get('debit-vendor-employee-reasons/status/{id}/{status}', [BusinessSettingsController::class, 'debitReasonStatus'])->name('debit-vendor-employee-reasons.status');
-            Route::delete('debit-vendor-employee-reasons/{id}', [BusinessSettingsController::class, 'debitReasonDestroy'])->name('debit-vendor-employee-reasons.destroy');
+    Route::put('debit-store-reasons/update', [BusinessSettingsController::class, 'debitStoreReasonUpdate'])
+        ->name('debit-store-reasons.update');
 
+    Route::get('debit-store-reasons/status/{id}/{status}', [BusinessSettingsController::class, 'debitStoreReasonStatus'])
+        ->name('debit-store-reasons.status');
+
+    Route::delete('debit-store-reasons/{id}', [BusinessSettingsController::class, 'debitStoreReasonDestroy'])
+        ->name('debit-store-reasons.destroy');
+
+
+            Route::post('debit-vendor-employee-reasons/store', [BusinessSettingsController::class, 'debitStoreReasonStore'])->name('debit-vendor-employee-reasons.store');
+            Route::put('debit-vendor-employee-reasons/update', [BusinessSettingsController::class, 'debitStoreReasonUpdate'])->name('debit-vendor-employee-reasons.update');
+            Route::get('debit-vendor-employee-reasons/status/{id}/{status}', [BusinessSettingsController::class, 'debitStoreReasonStatus'])->name('debit-vendor-employee-reasons.status');
+            Route::delete('debit-vendor-employee-reasons/{id}', [BusinessSettingsController::class, 'debitStoreReasonDestroy'])->name('debit-vendor-employee-reasons.destroy');
         });
 
         Route::group(['prefix' => 'users', 'as' => 'users.'], function () {
@@ -382,5 +395,52 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
                 });
             });
         });
+    });
+
+    // MoonJoin Cloud — admin tenant + api-product management (Stage 2.A)
+    Route::group(['middleware' => ['admin']], function () {
+        Route::group(['prefix' => 'merchants', 'as' => 'merchants.'], function () {
+            Route::get('/pending', [\App\Http\Controllers\Admin\MerchantController::class, 'pendingIndex'])->name('pending');
+            Route::get('/', [\App\Http\Controllers\Admin\MerchantController::class, 'index'])->name('index');
+            Route::get('/{id}', [\App\Http\Controllers\Admin\MerchantController::class, 'show'])->name('show');
+            Route::post('/{id}/approve', [\App\Http\Controllers\Admin\MerchantController::class, 'approve'])->name('approve');
+            Route::post('/{id}/reject', [\App\Http\Controllers\Admin\MerchantController::class, 'reject'])->name('reject');
+            Route::post('/{id}/suspend', [\App\Http\Controllers\Admin\MerchantController::class, 'suspend'])->name('suspend');
+            Route::post('/{id}/reactivate', [\App\Http\Controllers\Admin\MerchantController::class, 'reactivate'])->name('reactivate');
+        });
+        Route::group(['prefix' => 'api-products', 'as' => 'api-products.'], function () {
+            Route::get('/pending', [\App\Http\Controllers\Admin\ApiProductController::class, 'pendingIndex'])->name('pending');
+            Route::get('/', [\App\Http\Controllers\Admin\ApiProductController::class, 'index'])->name('index');
+            Route::get('/{id}', [\App\Http\Controllers\Admin\ApiProductController::class, 'show'])->name('show');
+            Route::post('/{id}/approve', [\App\Http\Controllers\Admin\ApiProductController::class, 'approve'])->name('approve');
+            Route::post('/{id}/reject', [\App\Http\Controllers\Admin\ApiProductController::class, 'reject'])->name('reject');
+            Route::post('/{id}/suspend', [\App\Http\Controllers\Admin\ApiProductController::class, 'suspend'])->name('suspend');
+            Route::post('/{id}/reactivate', [\App\Http\Controllers\Admin\ApiProductController::class, 'reactivate'])->name('reactivate');
+            Route::post('/{id}/modules/{moduleId}/toggle', [\App\Http\Controllers\Admin\ApiProductController::class, 'toggleModule'])->name('modules.toggle');
+        });
+
+        // MoonJoin Cloud — admin escrow monitoring (Stage 2.B)
+        Route::group(['prefix' => 'escrow', 'as' => 'escrow.'], function () {
+            Route::get('/', [\App\Http\Controllers\Admin\EscrowController::class, 'index'])->name('index');
+            Route::get('/{id}', [\App\Http\Controllers\Admin\EscrowController::class, 'show'])->name('show');
+            Route::post('/{id}/release', [\App\Http\Controllers\Admin\EscrowController::class, 'release'])->name('release');
+            Route::post('/{id}/refund', [\App\Http\Controllers\Admin\EscrowController::class, 'refund'])->name('refund');
+        });
+
+        // Stage 4 — Dispatch monitor + reassign
+        Route::group(['prefix' => 'dispatch', 'as' => 'dispatch.'], function () {
+            Route::get('/monitor', [\App\Http\Controllers\Admin\DispatchController::class, 'monitor'])->name('monitor');
+            Route::post('/{order}/reassign', [\App\Http\Controllers\Admin\DispatchController::class, 'reassign'])->name('reassign');
+        });
+
+        // Stage 4 — Delivery disputes
+        Route::group(['prefix' => 'disputes', 'as' => 'disputes.'], function () {
+            Route::get('/', [\App\Http\Controllers\Admin\DisputeController::class, 'index'])->name('index');
+            Route::get('/{id}', [\App\Http\Controllers\Admin\DisputeController::class, 'show'])->name('show');
+            Route::post('/{id}', [\App\Http\Controllers\Admin\DisputeController::class, 'update'])->name('update');
+        });
+
+        // Stage 5 — MoonJoin Cloud analytics
+        Route::get('/mj-cloud/analytics', [\App\Http\Controllers\Admin\AnalyticsController::class, 'index'])->name('mj-cloud.analytics');
     });
 });

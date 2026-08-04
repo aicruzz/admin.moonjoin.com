@@ -22,7 +22,7 @@ Route::group(['namespace' => 'Api\V1', 'middleware' => 'localization'], function
             return Artisan::output();
         }
     );
-    Route::post('/webhooks/ninepsb', 'NinePsbPaymentController@handle');
+    Route::post('/webhooks/ninepsb', 'NinePsbPaymentController@webhook');
     Route::group(
         ['prefix' => 'wallet', 'middleware' => ['auth:api']],
         function () {
@@ -33,6 +33,7 @@ Route::group(['namespace' => 'Api\V1', 'middleware' => 'localization'], function
             Route::post('name-enquiry', 'NinePsbPaymentController@nameEnquiry')->name('ninepsb.name-enquiry');
         }
     );
+    Route::get('wallet/banks/admin', 'NinePsbPaymentController@getBanks')->name('admin.ninepsb.banks');
     Route::group(
         ['prefix' => 'configurations'],
         function () {

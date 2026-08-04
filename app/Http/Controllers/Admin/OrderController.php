@@ -273,10 +273,17 @@ class OrderController extends Controller
             }
             $excludeDm = $order->delivery_man_id;
 
-            if (isset($order->store)) {
+            if (!empty($order->api_product_id)) {
+                // MoonJoin Cloud orders: strict isolation by vehicle + zone via DispatchFilter.
+                $query = DeliveryMan::query()->where('id', '!=', $excludeDm);
+                app(\App\Services\ApiProduct\DispatchFilter::class)->applyTo($query, $order);
+                $deliveryMen = $query->get();
+            } elseif (isset($order->store)) {
                 $deliveryMen = DeliveryMan::where('zone_id', $order->store->zone_id)
-                    ->where(function ($query) use ($order) {
-                        $query->where('vehicle_id', $order->dm_vehicle_id)->orWhereNull('vehicle_id');
+                    ->when($order->dm_vehicle_id, function ($query) use ($order) {
+                        $query->where(function ($q) use ($order) {
+                            $q->where('vehicle_id', $order->dm_vehicle_id)->orWhereNull('vehicle_id');
+                        });
                     })
                     ->where('id', '!=', $excludeDm)
                     ->available()
@@ -284,10 +291,12 @@ class OrderController extends Controller
                     ->get();
             } else {
                 if ($order->store !== null) {
-                    $deliveryMen = isset($order->zone_id) ? DeliveryMan::where('zone_id', $order->store->zone_id)->where(function ($query) use ($order) {
-                        $query->where('vehicle_id', $order->dm_vehicle_id)
-                            ->orWhereNull('vehicle_id');
-                    })
+                    $deliveryMen = isset($order->zone_id) ? DeliveryMan::where('zone_id', $order->store->zone_id)
+                        ->when($order->dm_vehicle_id, function ($query) use ($order) {
+                            $query->where(function ($q) use ($order) {
+                                $q->where('vehicle_id', $order->dm_vehicle_id)->orWhereNull('vehicle_id');
+                            });
+                        })
                         ->where('id', '!=', $excludeDm)
                         ->available()
                         ->active()
@@ -652,6 +661,19 @@ class OrderController extends Controller
 
             $order?->store ? Helpers::increment_order_count($order?->store) : '';
 
+            if (!empty($order->api_product_id) && in_array($order->escrow_status, [\App\Models\AdminEscrowHolding::STATUS_LOCKED, \App\Models\AdminEscrowHolding::STATUS_HELD], true)) {
+                try {
+                    app(\App\Services\Escrow\EscrowService::class)->refund($order, $request->reason ?? 'admin_cancel');
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::error('Admin cancel: escrow refund failed', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    Toastr::error(translate('messages.escrow_refund_failed'));
+                    return back();
+                }
+            }
+
             if (config('module.' . $order->module->module_type)['stock']) {
                 foreach ($order->details as $detail) {
                     $variant = json_decode($detail['variation'], true);
@@ -667,7 +689,7 @@ class OrderController extends Controller
                 $dm->current_orders = $dm->current_orders > 1 ? $dm->current_orders - 1 : 0;
                 $dm->save();
             }
-            if ($order->is_guest == 0) {
+            if (empty($order->api_product_id) && $order->is_guest == 0) {
 
                 OrderLogic::refund_before_delivered($order);
             }

@@ -4,6 +4,43 @@
 
 @push('css_or_js')
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <style>
+        .pick-order-btn {
+            min-width: 82px;
+            min-height: 34px !important;
+            height: auto !important;
+            width: auto !important;
+            padding: 0.45rem 0.9rem !important;
+            font-weight: 700;
+            font-size: 0.8125rem;
+            white-space: nowrap;
+            display: inline-flex !important;
+            align-items: center;
+            justify-content: center;
+            gap: 0.35rem;
+            color: #fff !important;
+            background-color: #039d55 !important;
+            border: 1px solid #039d55 !important;
+            border-radius: 0.3125rem;
+            box-shadow: 0 2px 6px rgba(3, 157, 85, 0.35);
+            opacity: 1 !important;
+            visibility: visible !important;
+        }
+
+        .pick-order-btn:hover,
+        .pick-order-btn:focus,
+        .pick-order-btn:active {
+            color: #fff !important;
+            background-color: #028346 !important;
+            border-color: #028346 !important;
+        }
+
+        .pick-order-btn i {
+            font-size: 1rem;
+            line-height: 1;
+            opacity: 1 !important;
+        }
+    </style>
 @endpush
 
 @section('content')
@@ -221,7 +258,21 @@
                         </thead>
 
                         <tbody id="set-rows">
+                        @php
+                            $currentEmployeeId = auth('vendor_employee')->check() ? auth('vendor_employee')->user()->id : null;
+                            $isEmployee = (bool) $currentEmployeeId;
+                        @endphp
                         @foreach($orders as $key=>$order)
+                            @php
+                                $isAssignedToMe = $isEmployee && $order->assigned_employee_id == $currentEmployeeId;
+                                $isAssignedToOther = $isEmployee && $order->assigned_employee_id && !$isAssignedToMe;
+                                $canPick = $isEmployee
+                                    && $order->order_status === 'pending'
+                                    && !$order->assigned_employee_id;
+                            @endphp
+                            @if($isAssignedToOther)
+                                @continue
+                            @endif
                             <tr class="status-{{$order['order_status']}} class-all">
                                 <td class="">
                                     {{$key+$orders->firstItem()}}
@@ -280,6 +331,10 @@
                                         <span class="badge badge-soft-info">
                                         {{translate('messages.pending')}}
                                         </span>
+                                    @elseif($order['order_status']=='assigned')
+                                        <span class="badge badge-soft-primary">
+                                        {{translate('messages.assigned')}}
+                                        </span>
                                     @elseif($order['order_status']=='confirmed')
                                         <span class="badge badge-soft-info">
                                         {{translate('messages.confirmed')}}
@@ -314,9 +369,27 @@
                                         {{translate('messages.home Delivery')}}
                                         </div>
                                     @endif
+                                    @if($isAssignedToMe)
+                                        <div class="badge badge-soft-success mt-1">
+                                            {{ translate('Assigned to you') }}
+                                        </div>
+                                    @endif
                                 </td>
                                 <td>
                                     <div class="btn--container justify-content-center">
+                                        @if($canPick)
+                                            <form action="{{ route('vendor.order.assign') }}" method="POST" class="d-inline pick-order-form">
+                                                @csrf
+                                                <input type="hidden" name="id" value="{{ $order->id }}">
+                                                <button type="submit"
+                                                    class="btn pick-order-btn"
+                                                    title="{{ translate('Pick order') }}"
+                                                    onclick="return confirm('{{ translate('Pick this order? It will be assigned to you and unavailable to other employees.') }}')">
+                                                    <i class="tio-hand-touch"></i>
+                                                    <span>{{ translate('Pick') }}</span>
+                                                </button>
+                                            </form>
+                                        @endif
                                         <a class="btn btn-sm btn--warning btn-outline-warning action-btn" href="{{route('vendor.order.details',['id'=>$order['id']])}}"><i class="tio-visible-outlined"></i></a>
                                         <a class="btn btn-sm btn--primary btn-outline-primary action-btn" target="_blank" href="{{route('vendor.order.generate-invoice',[$order['id']])}}"><i class="tio-print"></i></a>
                                     </div>

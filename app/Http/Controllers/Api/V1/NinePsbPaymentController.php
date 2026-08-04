@@ -646,9 +646,24 @@ class NinePsbPaymentController extends Controller
             'bankCode' => 'required|string',
         ]);
 
+        $inputMethod = strtolower(trim($validated['bankCode']));
+
+        $bankCodeMap = [
+            'opay'                   => '100004',
+            'moniepoint'             => '090405',
+            'palmpay'                => '100033',
+            'smartcash psb'          => '120001',
+            'access bank plc'        => '000014',
+            'united bank for africa' => '000004',
+            'kuda microfinance bank' => '090267',
+            'airpero'                => '090133',
+        ];
+
+        $finalBankCode = $bankCodeMap[$inputMethod] ?? $validated['bankCode'];
+
         $result = $this->nameEnquiryDirect(
             accountNumber: $validated['accountNumber'],
-            bankCode: $validated['bankCode'],
+            bankCode: $finalBankCode,
         );
 
         if ($result['success']) {
@@ -656,9 +671,9 @@ class NinePsbPaymentController extends Controller
                 'success' => true,
                 'message' => 'Account name resolved successfully',
                 'data' => [
-                    'accountName' => $result['accountName'],
+                    'accountName'   => $result['accountName'],
                     'accountNumber' => $validated['accountNumber'],
-                    'bankCode' => $validated['bankCode'],
+                    'bankCode'      => $finalBankCode,
                 ],
             ]);
         }

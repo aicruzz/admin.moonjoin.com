@@ -123,6 +123,8 @@ Route::group(['namespace' => 'Vendor', 'as' => 'vendor.'], function () {
         Route::prefix('employee')->name('employee.')->group(function () {
             Route::prefix('wallet')->name('wallet.')->group(function () {
                 Route::get('/', 'EmployeeWalletController@index')->name('index');
+                Route::get('credit', 'EmployeeWalletController@credit_page')->name('credit.page');
+                Route::post('credit', 'EmployeeWalletController@credit')->name('credit');
                 Route::post('debit', 'EmployeeWalletController@debit')->name('debit');
                 Route::get('method', 'EmployeeWalletController@wallet_method')->name('method');
                 Route::post('withdraw', 'EmployeeWalletController@withdraw_request')->name('withdraw.request');
@@ -192,14 +194,16 @@ Route::group(['namespace' => 'Vendor', 'as' => 'vendor.'], function () {
             Route::post('search-item', 'CampaignController@searchItem')->name('searchItem');
         });
 
-        Route::group(['prefix' => 'wallet', 'as' => 'wallet.', 'middleware' => ['module:wallet', 'subscription:wallet']], function () {
+        Route::group([ 'prefix' => 'wallet', 'as' => 'wallet.','middleware' => ['module:wallet', 'subscription:wallet'] ], function () {
+
             Route::get('/', 'WalletController@index')->name('index');
             Route::post('request', 'WalletController@w_request')->name('withdraw-request');
             Route::delete('close/{id}', 'WalletController@close_request')->name('close-request');
             Route::get('method-list', 'WalletController@method_list')->name('method-list');
             Route::post('make-collected-cash-payment', 'WalletController@make_payment')->name('make_payment');
             Route::post('make-wallet-adjustment', 'WalletController@make_wallet_adjustment')->name('make_wallet_adjustment');
-
+            Route::get('banks', 'WalletController@get_banks')->name('banks');
+            Route::post('name-enquiry', 'WalletController@name_enquiry')->name('name-enquiry');
             Route::get('wallet-payment-list', 'WalletController@wallet_payment_list')->name('wallet_payment_list');
             Route::get('disbursement-list', 'WalletController@getDisbursementList')->name('getDisbursementList');
             Route::get('export', 'WalletController@getDisbursementExport')->name('export');

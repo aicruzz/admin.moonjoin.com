@@ -53,18 +53,26 @@
 
                         <span
                             class="dropdown-header">{{translate('messages.download_options')}}</span>
-                        <a id="export-excel" class="dropdown-item" href="{{route('vendor.employee.export-employee', ['type'=>'excel',request()->getQueryString()])}}">
-                            <img class="avatar avatar-xss avatar-4by3 mr-2"
-                                    src="{{asset('public/assets/admin/svg/components/excel.svg')}}"
-                                    alt="Image Description">
-                            {{translate('messages.excel')}}
-                        </a>
-                        <a id="export-csv" class="dropdown-item" href="{{route('vendor.employee.export-employee', ['type'=>'csv',request()->getQueryString()])}}">
-                            <img class="avatar avatar-xss avatar-4by3 mr-2"
-                                    src="{{asset('public/assets/admin/svg/components/placeholder-csv-format.svg')}}"
-                                    alt="Image Description">
-                            .{{translate('messages.csv')}}
-                        </a>
+                      <a id="export-excel" class="dropdown-item"
+   href="{{ route('vendor.employee.export', array_merge(['type' => 'excel'], request()->query())) }}">
+
+    <img class="avatar avatar-xss avatar-4by3 mr-2"
+         src="{{ asset('public/assets/admin/svg/components/excel.svg') }}"
+         alt="Excel">
+
+    {{ translate('messages.excel') }}
+</a>
+
+
+<a id="export-csv" class="dropdown-item"
+   href="{{ route('vendor.employee.export', array_merge(['type' => 'csv'], request()->query())) }}">
+
+    <img class="avatar avatar-xss avatar-4by3 mr-2"
+         src="{{ asset('public/assets/admin/svg/components/placeholder-csv-format.svg') }}"
+         alt="CSV">
+
+    {{ translate('messages.csv') }}
+</a>
 
                     </div>
                 </div>

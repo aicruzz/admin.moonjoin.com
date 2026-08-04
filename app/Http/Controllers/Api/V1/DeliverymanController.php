@@ -263,7 +263,9 @@ class DeliverymanController extends Controller
             });
         }
         if (isset($dm->vehicle_id)) {
-            $orders = $orders->where('dm_vehicle_id', $dm->vehicle_id);
+            $orders = $orders->where(function ($q) use ($dm) {
+                $q->where('dm_vehicle_id', $dm->vehicle_id)->orWhereNull('dm_vehicle_id');
+            });
         }
         $orders = $orders->dmOrder()
             ->Notpos()

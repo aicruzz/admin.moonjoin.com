@@ -601,6 +601,23 @@
                             </a>
                         </li>
                     @endif
+
+                    {{-- Credit Employee Wallet — visible to store owner/vendor only --}}
+                    @if (!auth('vendor_employee')->check() && \App\CentralLogics\Helpers::employee_module_permission_check('employee'))
+                        <li
+                            class="navbar-vertical-aside-has-menu {{ Request::is('vendor-panel/employee-wallet/credit*') ? 'active' : '' }}">
+                            <a class="js-navbar-vertical-aside-menu-link nav-link"
+                                href="{{ route('vendor.employee.wallet.credit.page') }}"
+                                title="{{ translate('messages.credit_employee_wallet') }}">
+                                <i class="tio-add-circle nav-icon"></i>
+                                <span class="navbar-vertical-aside-mini-mode-hidden-elements text-truncate">
+                                    {{ translate('messages.credit_employee_wallet') }}
+                                </span>
+                            </a>
+                        </li>
+                    @endif
+
+
                     {{-- Employee Wallet — visible to logged-in employees only --}}
                     @if (auth('vendor_employee')->check())
                         <li

@@ -29,6 +29,7 @@ use App\Models\StoreWallet;
 use App\Models\VendorEmployee;
 use App\Models\DisbursementWithdrawalMethod;
 use App\Models\WithdrawRequest;
+use App\Http\Controllers\Api\V1\NinePsbPaymentController;
 
 
 class OrderController extends Controller
@@ -85,10 +86,8 @@ class OrderController extends Controller
             })
             ->when($status == 'all', function ($query) {
                 return $query->where(function ($query) {
-                    $query->whereNotIn('order_status', (config('order_confirmation_model') == 'store' || Helpers::get_store_data()->sub_self_delivery) ? ['failed', 'canceled', 'refund_requested', 'refunded'] : ['accepted', 'pending', 'failed', 'canceled', 'refund_requested', 'refunded'])
-                        ->orWhere(function ($query) {
-                            return $query->where('order_status', 'pending')->where('order_type', 'take_away');
-                        });
+                    $query->whereNotIn('order_status', (config('order_confirmation_model') == 'store' || Helpers::get_store_data()->sub_self_delivery) ? ['failed', 'canceled', 'refund_requested', 'refunded'] : ['accepted', 'failed', 'canceled', 'refund_requested', 'refunded'])
+                        ->orWhere('order_status', 'pending');
                 });
             })
             ->when(in_array($status, ['pending', 'confirmed']), function ($query) {
@@ -161,10 +160,8 @@ class OrderController extends Controller
             })
             ->when($status == 'all', function ($query) {
                 return $query->where(function ($query) {
-                    $query->whereNotIn('order_status', (config('order_confirmation_model') == 'store' || Helpers::get_store_data()->sub_self_delivery) ? ['failed', 'canceled', 'refund_requested', 'refunded'] : ['pending', 'failed', 'canceled', 'refund_requested', 'refunded'])
-                        ->orWhere(function ($query) {
-                            return $query->where('order_status', 'pending')->where('order_type', 'take_away');
-                        });
+                    $query->whereNotIn('order_status', (config('order_confirmation_model') == 'store' || Helpers::get_store_data()->sub_self_delivery) ? ['failed', 'canceled', 'refund_requested', 'refunded'] : ['accepted', 'failed', 'canceled', 'refund_requested', 'refunded'])
+                        ->orWhere('order_status', 'pending');
                 });
             })
             ->when(in_array($status, ['pending', 'confirmed']), function ($query) {
@@ -334,6 +331,14 @@ class OrderController extends Controller
             }
             if ($order->pay_status !== 'paid') {
                 Toastr::warning(translate('Please complete the payout before marking ready for handover.'));
+                return back();
+            }
+        }
+
+        if ($request['order_status'] == 'confirmed' && auth('vendor_employee')->check()) {
+            $employee = auth('vendor_employee')->user();
+            if ($order->assigned_employee_id && $order->assigned_employee_id != $employee->id) {
+                Toastr::warning(translate('Order unavailable'));
                 return back();
             }
         }
@@ -1642,31 +1647,7 @@ class OrderController extends Controller
 
     public function assign_order(Request $request)
     {
-        $request->validate(['id' => 'required|integer']);
-
-        $order = Order::where(['id' => $request->id, 'store_id' => Helpers::get_store_id()])->first();
-
-        if (!$order) {
-            Toastr::error(translate('messages.Order_not_found'));
-            return back();
-        }
-
-        if (!in_array($order->order_status, ['confirmed', 'accepted'])) {
-            Toastr::warning(translate('Only confirmed orders can be assigned.'));
-            return back();
-        }
-
-        if (!auth('vendor_employee')->check()) {
-            Toastr::warning(translate('Only vendor employees can assign orders.'));
-            return back();
-        }
-
-        $employee = auth('vendor_employee')->user();
-        $order->assigned_employee_id = $employee->id;
-        $order->save();
-
-        Toastr::success(translate('Order assigned to you. Proceed to cooking to lock it in.'));
-        return back();
+        return app(OrderEmployeePickController::class)->assign($request);
     }
 
     public function claim_order_funds(Request $request)
@@ -1674,7 +1655,7 @@ class OrderController extends Controller
         $request->validate(['id' => 'required|integer']);
 
         $order = Order::where(['id' => $request->id, 'store_id' => Helpers::get_store_id()])
-            ->with('transaction')
+            ->with(['transaction', 'customer'])
             ->first();
 
         if (!$order) {
@@ -1692,12 +1673,13 @@ class OrderController extends Controller
             return back();
         }
 
+        $unpaid_payment = OrderPayment::where('payment_status', 'unpaid')->where('order_id', $order->id)->first()?->payment_method;
+        $unpaid_pay_method = $unpaid_payment ?? 'digital_payment';
+        $is_cod = $order->payment_method == 'cash_on_delivery' || $unpaid_pay_method == 'cash_on_delivery';
+
         // Create the order transaction (credits vendor wallet)
         if ($order->transaction === null) {
-            $unpaid_payment = OrderPayment::where('payment_status', 'unpaid')->where('order_id', $order->id)->first()?->payment_method;
-            $unpaid_pay_method = $unpaid_payment ?? 'digital_payment';
-
-            if ($order->payment_method == 'cash_on_delivery' || $unpaid_pay_method == 'cash_on_delivery') {
+            if ($is_cod) {
                 $ol = OrderLogic::create_transaction($order, 'store', null);
             } else {
                 $ol = OrderLogic::create_transaction($order, 'admin', null);
@@ -1706,6 +1688,28 @@ class OrderController extends Controller
             if (!$ol) {
                 Toastr::error(translate('Failed to create order transaction. Please try again.'));
                 return back();
+            }
+        }
+
+        // Debit the customer's 9PSB virtual wallet for non-CoD orders
+        if (!$is_cod && $order->customer) {
+            $debitAmount = $order->payment_status === 'partially_paid'
+                ? (float) $order->partially_paid_amount
+                : (float) $order->order_amount;
+
+            $ninePsb = new NinePsbPaymentController();
+            $debited = $ninePsb->debitCustomer(
+                $order->customer,
+                $debitAmount,
+                "Payment for Order #{$order->id}"
+            );
+
+            if (!$debited) {
+                \Illuminate\Support\Facades\Log::warning('claim_order_funds: 9PSB virtual wallet debit failed', [
+                    'order_id' => $order->id,
+                    'user_id'  => $order->customer->id,
+                    'amount'   => $debitAmount,
+                ]);
             }
         }
 

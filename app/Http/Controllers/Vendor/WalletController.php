@@ -17,6 +17,7 @@ use App\Models\WithdrawRequest;
 use App\Models\WithdrawalMethod;
 use App\Mail\WithdrawRequestMail;
 use App\Models\AccountTransaction;
+use App\Http\Controllers\Api\V1\NinePsbPaymentController;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -569,6 +570,16 @@ class WalletController extends Controller
         } else if ($request->type == 'csv') {
             return Excel::download(new DisbursementHistoryExport($data), 'Disbursementlist.csv');
         }
+    }
+
+    public function get_banks(Request $request)
+    {
+        return (new NinePsbPaymentController)->getBanks($request);
+    }
+
+    public function name_enquiry(Request $request)
+    {
+        return (new NinePsbPaymentController)->nameEnquiry($request);
     }
 
 }

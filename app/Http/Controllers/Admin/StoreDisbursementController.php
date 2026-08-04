@@ -11,8 +11,10 @@ use App\Models\Disbursement;
 use App\Models\DisbursementDetails;
 use App\Models\StoreWallet;
 use App\Models\WithdrawRequest;
+use App\Services\Disbursement\DisbursementPayoutService;
 use Brian2694\Toastr\Facades\Toastr;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\View;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -248,9 +250,14 @@ class StoreDisbursementController extends Controller
     }
     public function generate_disbursement()
     {
-        $stores = Store::all();
-        $disbursement_details = [];
-        $total_amount = 0;
+        $type = BusinessSetting::where('key', 'store_disbursement_type')->first()?->value ?? 'manual';
+        if ($type !== 'automated') {
+            Log::info('Store auto-disbursement skipped — type is not automated', ['type' => $type]);
+            return true;
+        }
+
+        $payoutService = app(DisbursementPayoutService::class);
+        $minimum_amount = BusinessSetting::where('key', 'store_disbursement_min_amount')->first()?->value ?? 0;
 
         $disbursement = new Disbursement();
         $disbursement->id = 1000 + Disbursement::count() + 1;
@@ -258,44 +265,97 @@ class StoreDisbursementController extends Controller
             $disbursement->id = Disbursement::orderBy('id', 'desc')->first()->id + 1;
         }
         $disbursement->title = 'Disbursement # '.$disbursement->id;
-        $minimum_amount = BusinessSetting::where(['key' => 'store_disbursement_min_amount'])->first()?->value;
-        foreach ($stores as $store){
-            if(isset($store->vendor->wallet)){
+        $disbursement->created_for = 'store';
+        $disbursement->total_amount = 0;
+        $disbursement->save();
 
-                $total_earning = $store->vendor->wallet->total_earning ?? 0;
-                $total_withdraw = ($store->vendor->wallet->total_withdrawn ?? 0) + ($store->vendor->wallet->pending_withdraw ?? 0);
-                $total_cash_in_hand = $store->vendor->wallet->collected_cash ?? 0;
-                $disbursement_amount = ((string) $total_earning> (string) ($total_withdraw+$total_cash_in_hand))?(  ($total_earning - ($total_withdraw+$total_cash_in_hand))):0;
+        $total_amount = 0;
+        $any_row = false;
 
-                if ($disbursement_amount > $minimum_amount && isset($store->disbursement_method)){
+        foreach (Store::all() as $store) {
+            $wallet = $store->vendor?->wallet;
+            if (!$wallet || !isset($store->disbursement_method)) {
+                continue;
+            }
 
-                    $res_d = [
-                        'disbursement_id' => $disbursement->id,
-                        'store_id' => $store->id,
-                        'disbursement_amount' => $disbursement_amount,
-                        'payment_method' => $store->disbursement_method->id,
-                        'created_at' => now(),
-                        'updated_at' => now()
-                    ];
-                    $disbursement_details[] = $res_d;
-                    $total_amount += $res_d['disbursement_amount'];
+            $total_earning = $wallet->total_earning ?? 0;
+            $total_withdraw = ($wallet->total_withdrawn ?? 0) + ($wallet->pending_withdraw ?? 0);
+            $total_cash_in_hand = $wallet->collected_cash ?? 0;
+            $disbursement_amount = ((string) $total_earning > (string) ($total_withdraw + $total_cash_in_hand))
+                ? ($total_earning - ($total_withdraw + $total_cash_in_hand))
+                : 0;
 
-                    $store->vendor->wallet->pending_withdraw = $store->vendor->wallet->pending_withdraw + $disbursement_amount;
-                    $store->vendor->wallet->save();
-                }
+            if ($disbursement_amount <= $minimum_amount) {
+                continue;
+            }
+
+            $any_row = true;
+            $method = $store->disbursement_method;
+
+            $detail = new DisbursementDetails();
+            $detail->disbursement_id = $disbursement->id;
+            $detail->store_id = $store->id;
+            $detail->disbursement_amount = $disbursement_amount;
+            $detail->payment_method = $method->id;
+            $detail->status = 'pending';
+            $detail->save();
+
+            $wallet->increment('pending_withdraw', $disbursement_amount);
+            $total_amount += $disbursement_amount;
+
+            $methodFields = is_array($method->method_fields)
+                ? $method->method_fields
+                : (json_decode($method->method_fields, true) ?? []);
+
+            $result = $payoutService->payout(
+                amount: (float) $disbursement_amount,
+                methodName: $method->method_name,
+                methodFields: $methodFields,
+                narration: 'Store Disbursement #' . $disbursement->id,
+            );
+
+            if ($result['success']) {
+                $wallet->decrement('pending_withdraw', $disbursement_amount);
+                $wallet->increment('total_withdrawn', $disbursement_amount);
+
+                $withdraw = new WithdrawRequest();
+                $withdraw->vendor_id = $store->vendor?->id;
+                $withdraw->amount = $disbursement_amount;
+                $withdraw->withdrawal_method_id = $method->id;
+                $withdraw->withdrawal_method_fields = $method->method_fields;
+                $withdraw->approved = 1;
+                $withdraw->transaction_note = $detail->id;
+                $withdraw->type = 'disbursement';
+                $withdraw->save();
+
+                $detail->status = 'completed';
+                $detail->transaction_note = 'Auto-paid via 9PSB to ' . ($result['account_name'] ?? '')
+                    . ' (' . ($result['bank_name'] ?? '') . ')';
+                $detail->save();
+            } else {
+                $detail->transaction_note = '9PSB failed: ' . ($result['message'] ?? 'unknown');
+                $detail->save();
+                Log::warning('Store auto-disbursement payout failed', [
+                    'detail_id' => $detail->id,
+                    'store_id' => $store->id,
+                    'amount' => $disbursement_amount,
+                    'message' => $result['message'] ?? null,
+                ]);
             }
         }
 
-        if ($total_amount > 0){
-            $disbursement->total_amount = $total_amount;
-            $disbursement->created_for = 'store';
-            $disbursement->save();
-
-            DisbursementDetails::insert($disbursement_details);
+        if (!$any_row) {
+            $disbursement->delete();
+            Log::info('Store auto-disbursement: no eligible recipients, parent removed');
+            return true;
         }
-        info("Store-----Disbursement");
-        return true;
 
+        $disbursement->total_amount = $total_amount;
+        $disbursement->save();
+        self::check_status($disbursement->id);
+
+        Log::info('Store auto-disbursement completed', ['disbursement_id' => $disbursement->id, 'total' => $total_amount]);
+        return true;
     }
 
     public function check_status($id) {

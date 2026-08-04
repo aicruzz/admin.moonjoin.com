@@ -175,12 +175,12 @@ trait PlaceNewOrder
 
 
             $order_status = 'pending';
-            if (($request->partial_payment && $request->payment_method != 'offline_payment') || $request->payment_method == 'wallet') {
-                $order_status = 'confirmed';
-            }
-            if (in_array($request->payment_method, ['digital_payment', 'offline_payment'])) {
-                $order_status = 'failed';
-            }
+            // if (($request->partial_payment && $request->payment_method != 'offline_payment') || $request->payment_method == 'wallet') {
+            //     $order_status = 'confirmed';
+            // }
+            // if (in_array($request->payment_method, ['digital_payment', 'offline_payment'])) {
+            //     $order_status = 'failed';
+            // }
 
             $order->bring_change_amount = $request['bring_change_amount'] ?? 0;
 
@@ -561,7 +561,7 @@ trait PlaceNewOrder
             }
 
             DB::commit();
-            if ($request->user && in_array($order->payment_status, ['paid', 'partially_paid'])) {
+             if ($request->user && in_array($order->payment_status, ['paid', 'partially_paid'])) {
                 app(\App\Services\NinePsbService::class)->debitCustomer($order, $request->user);
             }
 

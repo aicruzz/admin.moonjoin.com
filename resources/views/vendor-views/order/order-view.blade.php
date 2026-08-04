@@ -1,4 +1,4 @@
-@extends('layouts.vendor.app')
+ @extends('layouts.vendor.app')
 
 @section('title', translate('messages.Order Details'))
 
@@ -223,9 +223,9 @@
                                     @endif
                                 </h6>
                                 @if ($order->order_attachment)
-                                        @php
+                                        <?php
                                             $order_images = json_decode($order->order_attachment,true);
-                                        @endphp
+                                        ?>
                                     {{-- @if (is_array($order_images)) --}}
                                         <h5 class="text-dark">
                                             {{ translate('messages.prescription') }}:
@@ -478,12 +478,12 @@
                                                                         @endforeach
                                                                     @endif
                                                                 @else
-                                                                    @if (count(json_decode($detail['variation'], true)) > 0)
+                                                                    @if (count(json_decode($detail['variation'], true) ?? []) > 0)
                                                                         <strong><u>{{ translate('messages.variation') }}
                                                                                 :
                                                                             </u></strong>
                                                                     <?php
-                                                                        $detailsVariation = isset(json_decode($detail['variation'], true)[0]) ? json_decode($detail['variation'], true)[0] : json_decode($detail['variation'], true);
+                                                                        $detailsVariation = isset(json_decode($detail['variation'], true)[0]) ? json_decode($detail['variation'], true)[0] : (json_decode($detail['variation'], true) ?? []);
                                                                     ?>
                                                                         @foreach ($detailsVariation as $key1 => $variation)
                                                                             @if ($key1 != 'stock' || ($order->store && config('module.' . $order->store->module->module_type)['stock']))
@@ -590,7 +590,7 @@
                                                                     {{ \App\CentralLogics\Helpers::format_currency($detail['price']) }}
                                                                 </h6>
 
-                                                                @if (count(json_decode($detail['variation'], true)) > 0)
+                                                                @if (count(json_decode($detail['variation'], true) ?? []) > 0)
                                                                     <strong><u>{{ translate('messages.variation') }} :
                                                                         </u></strong>
                                                                     @foreach (json_decode($detail['variation'], true)[0] as $key1 => $variation)
@@ -764,7 +764,6 @@
                                         + {{ \App\CentralLogics\Helpers::format_currency($order->dm_tips) }}</dd>
                                     <dt class="col-6">{{ translate('messages.delivery_fee') }}:</dt>
                                     <dd class="col-6">
-                                        @php($del_c = $order['delivery_charge'])
                                         + {{ \App\CentralLogics\Helpers::format_currency($del_c) }}
                                         <hr>
                                     </dd>
@@ -871,7 +870,7 @@
                 <!-- End Card -->
             </div>
 
-            <div class="col-lg-4">
+        <div class="col-lg-4">
                 <!-- Card -->
                 @if ($order->order_status != 'refund_requested' &&
                     $order->order_status != 'refunded' &&
@@ -895,7 +894,7 @@
                                 </div>
                             @endif
                             <!-- Order Status Flow Starts -->
-                            @php($order_delivery_verification = (bool) \App\Models\BusinessSetting::where(['key' => 'order_delivery_verification'])->first()->value)
+                            @php($order_delivery_verification = (bool) (\App\Models\BusinessSetting::where(['key' => 'order_delivery_verification'])->first()?->value ?? 0))
                             <div class="mb-4">
                                 <div class="row g-1">
                                     <div class="{{ config('canceled_by_store') ? 'col-6' : 'col-12' }}">
@@ -911,7 +910,7 @@
                                         </div>
                                     @endif
                                 </div>
-                                    @php
+                                    <?php
                                         $currentEmployeeId = auth('vendor_employee')->check() ? auth('vendor_employee')->user()->id : null;
                                         $isEmployee = (bool) $currentEmployeeId;
                                         $isAssignedToMe = $isEmployee && $order->assigned_employee_id == $currentEmployeeId;
@@ -919,7 +918,17 @@
                                         $canCook = !$isEmployee || $isAssignedToMe || !$order->assigned_employee_id;
                                         $readyForHandover = $order->claim_status === 'claimed' && $order->pay_status === 'paid';
                                         $isFood = $order->store && $order->store->module->module_type == 'food';
-                                    @endphp
+                                    ?>
+
+                                    @if ($isEmployee && $order->order_status === 'pending' && $isAssignedToMe)
+                                        <div class="alert alert-success py-2 mb-2 text-center">
+                                            <i class="tio-checkmark-circle"></i> {{ translate('Picked by you — confirm this order to continue.') }}
+                                        </div>
+                                    @elseif ($isEmployee && $order->order_status === 'pending' && $isAssignedToOther)
+                                        <div class="alert alert-warning py-2 mb-2 text-center">
+                                            <i class="tio-warning"></i> {{ translate('Assigned to another employee.') }}
+                                        </div>
+                                    @endif
 
                                     {{-- Assign button for confirmed orders (employees only) --}}
                                     @if ($isEmployee && in_array($order->order_status, ['confirmed', 'accepted']))
@@ -1035,11 +1044,10 @@
 
                             </div>
                         </div>
-
                         <!-- End Body -->
                     </div>
+                    <!-- End Card -->
                 @endif
-                <!-- End Card -->
                 @if ($order->order_status == 'canceled')
                 <ul class="delivery--information-single mt-3">
                     <li>

@@ -1281,10 +1281,27 @@ class Helpers
                 'Content-Type' => 'application/json',
             ];
             try {
-                Http::withHeaders($headers)->post($url, $data);
+                $fcmResponse = Http::withHeaders($headers)->post($url, $data);
+                // TEMP DEBUG — remove after diagnosing rider notifications
+                \Illuminate\Support\Facades\Log::info('FCM_SEND_RESULT', [
+                    'topic' => data_get($data, 'message.topic'),
+                    'http_status' => $fcmResponse->status(),
+                    'body' => mb_substr($fcmResponse->body(), 0, 500),
+                ]);
             }catch (\Exception $exception){
+                // TEMP DEBUG — remove after diagnosing rider notifications
+                \Illuminate\Support\Facades\Log::error('FCM_SEND_EXCEPTION', [
+                    'topic' => data_get($data, 'message.topic'),
+                    'error' => $exception->getMessage(),
+                ]);
                 return false;
             }
+        } else {
+            // TEMP DEBUG — remove after diagnosing rider notifications
+            \Illuminate\Support\Facades\Log::warning('FCM_NO_PROJECT_ID', [
+                'topic' => data_get($data, 'message.topic'),
+                'note' => 'push_notification_service_file_content missing/invalid project_id — no FCM call made',
+            ]);
         }
         return false;
     }
@@ -1368,6 +1385,14 @@ class Helpers
 
     public static function send_push_notif_to_topic($data, $topic, $type,$web_push_link = null)
     {
+        // TEMP DEBUG — remove after diagnosing rider notifications
+        \Illuminate\Support\Facades\Log::info('PUSH_TOPIC_DEBUG', [
+            'topic' => $topic,
+            'type' => $type,
+            'order_id' => $data['order_id'] ?? null,
+            'order_type' => $data['order_type'] ?? null,
+            'zone_id' => $data['zone_id'] ?? null,
+        ]);
         if(isset($data['module_id'])){
             $module_id = $data['module_id'];
         }else{
@@ -1849,6 +1874,7 @@ class Helpers
                             self::send_push_notif_to_topic($data, $topic, 'order_request');
                         }
                         self::send_push_notif_to_topic($data, $order->zone->deliveryman_wise_topic, 'order_request');
+                        self::send_push_notif_to_topic($data, 'zone_'.$order->zone_id.'_delivery_man_push', 'order_request');
 
 
                     }
@@ -1872,6 +1898,7 @@ class Helpers
                         self::send_push_notif_to_topic($data, $topic, 'order_request');
                     }
                     self::send_push_notif_to_topic($data, $order->zone->deliveryman_wise_topic, 'order_request');
+                    self::send_push_notif_to_topic($data, 'zone_'.$order->zone_id.'_delivery_man_push', 'order_request');
 
                 }
                 // self::send_push_notif_to_topic($data, 'admin_message', 'order_request');
@@ -1983,6 +2010,7 @@ class Helpers
                         self::send_push_notif_to_topic($data, $topic, 'order_request');
                     }
                     self::send_push_notif_to_topic($data, $order->zone->deliveryman_wise_topic, 'order_request');
+                    self::send_push_notif_to_topic($data, 'zone_'.$order->zone_id.'_delivery_man_push', 'order_request');
                 }
                 }
             }
@@ -3715,6 +3743,18 @@ class Helpers
         }
 
         return 'def.png';
+    }
+
+    public static function logoFullUrl()
+    {
+        $logo = \App\Models\BusinessSetting::where(['key' => 'logo'])->first();
+        return self::get_full_url('business', $logo?->value ?? '', $logo?->storage[0]?->value ?? 'public', 'favicon');
+    }
+
+    public static function iconFullUrl()
+    {
+        $icon = \App\Models\BusinessSetting::where(['key' => 'icon'])->first();
+        return self::get_full_url('business', $icon?->value ?? '', $icon?->storage[0]?->value ?? 'public', 'favicon');
     }
 
 

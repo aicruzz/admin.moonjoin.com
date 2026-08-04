@@ -10,9 +10,11 @@ use App\Models\DeliveryMan;
 use App\Models\Disbursement;
 use App\Models\DisbursementDetails;
 use App\Models\ProvideDMEarning;
+use App\Services\Disbursement\DisbursementPayoutService;
 use Brian2694\Toastr\Facades\Toastr;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\View;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -258,9 +260,14 @@ class DeliveryManDisbursementController extends Controller
     }
     public function generate_disbursement()
     {
-        $delivery_mans = DeliveryMan::where('type' ,'zone_wise')->where('earning',1)->get();
-        $disbursement_details = [];
-        $total_amount = 0;
+        $type = BusinessSetting::where('key', 'dm_disbursement_type')->first()?->value ?? 'manual';
+        if ($type !== 'automated') {
+            Log::info('DM auto-disbursement skipped — type is not automated', ['type' => $type]);
+            return true;
+        }
+
+        $payoutService = app(DisbursementPayoutService::class);
+        $minimum_amount = BusinessSetting::where('key', 'dm_disbursement_min_amount')->first()?->value ?? 0;
 
         $disbursement = new Disbursement();
         $disbursement->id = 1000 + Disbursement::count() + 1;
@@ -268,44 +275,95 @@ class DeliveryManDisbursementController extends Controller
             $disbursement->id = Disbursement::orderBy('id', 'desc')->first()->id + 1;
         }
         $disbursement->title = 'Disbursement # '.$disbursement->id;
-        $minimum_amount = BusinessSetting::where(['key' => 'dm_disbursement_min_amount'])->first()?->value;
-        foreach ($delivery_mans as $delivery_man){
-            if(isset($delivery_man->wallet)){
+        $disbursement->created_for = 'delivery_man';
+        $disbursement->total_amount = 0;
+        $disbursement->save();
 
-                $total_earning = $delivery_man->wallet?$delivery_man->wallet->total_earning:0;
-                $total_withdraw = ($delivery_man->wallet?$delivery_man->wallet->total_withdrawn:0) + ($delivery_man->wallet?$delivery_man->wallet->pending_withdraw:0);
-                $total_cash_in_hand = $delivery_man->wallet?$delivery_man->wallet->collected_cash:0;
-                $disbursement_amount = ( (string) $total_earning >  (string)  ($total_withdraw+$total_cash_in_hand))?  ($total_earning - ($total_withdraw+$total_cash_in_hand)):0;
+        $total_amount = 0;
+        $any_row = false;
 
-                if ($disbursement_amount>$minimum_amount && $delivery_man->disbursement_method){
-                    $res_d = [
-                        'disbursement_id' => $disbursement->id,
-                        'delivery_man_id' => $delivery_man->id,
-                        'disbursement_amount' => $disbursement_amount,
-                        'payment_method' => $delivery_man->disbursement_method->id,
-                        'created_at' => now(),
-                        'updated_at' => now()
-                    ];
-                    $disbursement_details[] = $res_d;
-                    $total_amount += $res_d['disbursement_amount'];
-                    $delivery_man->wallet->pending_withdraw = $delivery_man->wallet->pending_withdraw + $disbursement_amount;
-                    $delivery_man->wallet->save();
-                }
+        $delivery_mans = DeliveryMan::where('type', 'zone_wise')->where('earning', 1)->get();
+        foreach ($delivery_mans as $delivery_man) {
+            $wallet = $delivery_man->wallet;
+            if (!$wallet || !$delivery_man->disbursement_method) {
+                continue;
             }
 
+            $total_earning = $wallet->total_earning ?? 0;
+            $total_withdraw = ($wallet->total_withdrawn ?? 0) + ($wallet->pending_withdraw ?? 0);
+            $total_cash_in_hand = $wallet->collected_cash ?? 0;
+            $disbursement_amount = ((string) $total_earning > (string) ($total_withdraw + $total_cash_in_hand))
+                ? ($total_earning - ($total_withdraw + $total_cash_in_hand))
+                : 0;
+
+            if ($disbursement_amount <= $minimum_amount) {
+                continue;
+            }
+
+            $any_row = true;
+            $method = $delivery_man->disbursement_method;
+
+            $detail = new DisbursementDetails();
+            $detail->disbursement_id = $disbursement->id;
+            $detail->delivery_man_id = $delivery_man->id;
+            $detail->disbursement_amount = $disbursement_amount;
+            $detail->payment_method = $method->id;
+            $detail->status = 'pending';
+            $detail->save();
+
+            $wallet->increment('pending_withdraw', $disbursement_amount);
+            $total_amount += $disbursement_amount;
+
+            $methodFields = is_array($method->method_fields)
+                ? $method->method_fields
+                : (json_decode($method->method_fields, true) ?? []);
+
+            $result = $payoutService->payout(
+                amount: (float) $disbursement_amount,
+                methodName: $method->method_name,
+                methodFields: $methodFields,
+                narration: 'Delivery Man Disbursement #' . $disbursement->id,
+            );
+
+            if ($result['success']) {
+                $wallet->decrement('pending_withdraw', $disbursement_amount);
+                $wallet->increment('total_withdrawn', $disbursement_amount);
+
+                $earning = new ProvideDMEarning();
+                $earning->delivery_man_id = $delivery_man->id;
+                $earning->method = $method->method_name;
+                $earning->ref = $detail->id;
+                $earning->amount = $disbursement_amount;
+                $earning->save();
+
+                $detail->status = 'completed';
+                $detail->transaction_note = 'Auto-paid via 9PSB to ' . ($result['account_name'] ?? '')
+                    . ' (' . ($result['bank_name'] ?? '') . ')';
+                $detail->save();
+            } else {
+                $detail->transaction_note = '9PSB failed: ' . ($result['message'] ?? 'unknown');
+                $detail->save();
+                Log::warning('DM auto-disbursement payout failed', [
+                    'detail_id' => $detail->id,
+                    'delivery_man_id' => $delivery_man->id,
+                    'amount' => $disbursement_amount,
+                    'message' => $result['message'] ?? null,
+                ]);
+            }
         }
 
-        if ($total_amount > 0){
-            $disbursement->total_amount = $total_amount;
-            $disbursement->created_for = 'delivery_man';
-            $disbursement->save();
-
-            DisbursementDetails::insert($disbursement_details);
+        if (!$any_row) {
+            $disbursement->delete();
+            Log::info('DM auto-disbursement: no eligible recipients, parent removed');
+            return true;
         }
 
-        info("DM-----Disbursement");
+        $disbursement->total_amount = $total_amount;
+        $disbursement->save();
+        self::check_status($disbursement->id);
+
+        Log::info('DM auto-disbursement completed', ['disbursement_id' => $disbursement->id, 'total' => $total_amount]);
         return true;
-
     }
 
     public function check_status($id) {
