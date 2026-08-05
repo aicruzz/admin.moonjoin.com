@@ -76,7 +76,6 @@ Route::group(['middleware' => ['admin', 'current-module']], function () {
                 Route::get('new-requests', [ProviderController::class, 'newRequests'])->name('new-requests');
                 Route::get('new-requests-details/{id}', [ProviderController::class, 'newRequestsDetails'])->name('new-requests-details');
                 Route::get('approve-or-deny/{id}', [ProviderController::class, 'approveOrDeny'])->name('approve-or-deny');
-                Route::get('status/{store_id}', [ProviderController::class, 'status'])->name('status');
 
                 Route::get('bulk-import', [ProviderController::class, 'bulkImportIndex'])->name('bulk_import');
                 Route::post('bulk-import', [ProviderController::class, 'bulkImportData']);
