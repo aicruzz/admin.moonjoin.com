@@ -163,6 +163,7 @@ class ConfigController extends Controller
         $vehicle_distance_min = 0;
         $vehicle_hourly_min = 0;
         $vehicle_day_wise_min = 0;
+        $systemTax = null;
 
         $drivemondExternalSetting = false;
 
