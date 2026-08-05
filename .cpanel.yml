@@ -1,0 +1,19 @@
+---
+# cPanel Git Version Control deployment manifest — MoonJoin Laravel backend.
+#
+# The repository IS the application directory and the document root, so there
+# is no copy or sync step: cPanel checks out in place, then this file runs the
+# release tasks. Nothing outside DEPLOYPATH is ever touched — in particular
+# /home/moonxmmg/public_html (Flutter Web) is never referenced.
+#
+# All logic lives in deploy-backend.sh so the identical release process can run
+# on DigitalOcean from CI or systemd. This file is the cPanel adapter, nothing
+# more. The legacy deploy.sh (Next.js/pm2) is unrelated and untouched.
+#
+# To pin a specific PHP build, prepend a task such as:
+#   - export PHP_BIN=/opt/cpanel/ea-php83/root/usr/bin/php
+# The script validates PHP >= 8.2 and aborts before maintenance mode otherwise.
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/moonxmmg/admin.moonjoin.com
+    - /bin/bash "$DEPLOYPATH/deploy-backend.sh"
