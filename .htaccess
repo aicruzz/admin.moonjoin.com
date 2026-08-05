@@ -28,3 +28,56 @@
     Order allow,deny
     Deny from all
 </Files>
+
+# --- Phase 1.4E: security hardening ---
+# The document root is the application root, so any existing file is served
+# directly by Apache (the rewrite above only fires when !-f). These rules deny
+# sensitive files. They add no rewrite, routing or asset-serving behavior.
+#
+# Dual syntax: Apache 2.4 uses mod_authz_core, 2.2 uses mod_access_compat.
+
+# Environment files of every variant (.env is already denied above;
+# this additionally covers .env.production, .env.backup, .env.local, ...).
+<FilesMatch "^\.env">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Logs, SQL dumps and backup artifacts.
+<FilesMatch "\.(log|sql|dump|bak|backup|old|swp|orig)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Editor/OS backup files ending in a tilde.
+<FilesMatch "~$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Version control metadata. Without this the entire repository history is
+# downloadable when the repo lives under the document root. Uses mod_alias
+# rather than mod_rewrite so the existing rewrite rules are left untouched.
+<IfModule mod_alias.c>
+    RedirectMatch 404 (^|/)\.git(/|$)
+</IfModule>
+
+# Disable directory listings.
+<IfModule mod_autoindex.c>
+    Options -Indexes
+</IfModule>
