@@ -41,3 +41,4 @@ auth.json
 *.local.sql
 *.dump
 /backup/
+/storage/app/backups/
