@@ -301,7 +301,7 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
         Route::group(['prefix' => 'users', 'as' => 'users.'], function () {
             Route::group(['prefix' => 'custom-role', 'as' => 'custom-role.', 'middleware' => ['module:custom_role']], function () {
                 Route::get(CustomRole::ADD[URI], [CustomRoleController::class, 'index'])->name('create');
-                Route::post(CustomRole::ADD[URI], [CustomRoleController::class, 'add'])->name('create');
+                Route::post(CustomRole::ADD[URI], [CustomRoleController::class, 'add'])->name('create.store');
                 Route::get(CustomRole::EDIT[URI] . '/{id}', [CustomRoleController::class, 'getUpdateView'])->name('edit');
                 Route::post(CustomRole::UPDATE[URI] . '/{id}', [CustomRoleController::class, 'update'])->name('update');
                 Route::delete(CustomRole::DELETE[URI] . '/{id}', [CustomRoleController::class, 'delete'])->name('delete');
@@ -311,7 +311,7 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
             Route::group(['prefix' => 'employee', 'as' => 'employee.', 'middleware' => ['module:employee']], function () {
                 Route::get(Employee::INDEX[URI], [EmployeeController::class, 'index'])->name('list');
                 Route::get(Employee::ADD[URI], [EmployeeController::class, 'getAddView'])->name('add-new');
-                Route::post(Employee::ADD[URI], [EmployeeController::class, 'add'])->name('add-new');
+                Route::post(Employee::ADD[URI], [EmployeeController::class, 'add'])->name('add-new.store');
                 Route::get(Employee::UPDATE[URI] . '/{id}', [EmployeeController::class, 'getUpdateView'])->name('edit');
                 Route::post(Employee::UPDATE[URI] . '/{id}', [EmployeeController::class, 'update'])->name('update');
                 Route::delete(Employee::DELETE[URI] . '/{id}', [EmployeeController::class, 'delete'])->name('delete');

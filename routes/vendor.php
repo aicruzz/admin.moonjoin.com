@@ -80,7 +80,7 @@ Route::group(['namespace' => 'Vendor', 'as' => 'vendor.'], function () {
             Route::get('create', 'CustomRoleController@create')->name('create');
             Route::post('create', 'CustomRoleController@store')->name('store');
             Route::get('edit/{id}', 'CustomRoleController@edit')->name('edit');
-            Route::post('update/{id}', 'CustomRoleController@update')->name('update');
+            Route::post('update/{id}', 'CustomRoleController@update')->name('update.submit');
             Route::delete('delete/{id}', 'CustomRoleController@distroy')->name('delete');
         });
 
