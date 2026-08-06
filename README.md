@@ -72,3 +72,8 @@ The Laravel framework is open-sourced software licensed under the [MIT license](
         .select2-container--default .select2-selection--single{
             background-color:#fff;display: block;width: 100%;height: calc(1.6em + 1.21875rem);padding: .54688rem .875rem;font-size: .875rem;font-weight: 400;line-height: 1.6;color: #1e2022;background-color: #fff;background-clip: padding-box;border: .0625rem solid #e7eaf3;border-radius: .3125rem;transition: border-color .15s ease-in-out,box-shadow .15s ease-in-out;
             }
+
+##  How to push 
+git add .
+git commit -m "test: verify production deployment pipeline"
+git push origin main         
