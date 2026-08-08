@@ -4,13 +4,19 @@ namespace App\Http\Controllers\Admin;
 
 use Illuminate\Http\Request;
 use App\CentralLogics\Helpers;
+use App\Models\AuditLog;
 use App\Models\BusinessSetting;
+use App\Models\User;
 use App\Models\WalletTransaction;
 use App\CentralLogics\CustomerLogic;
 use App\Exports\CustomerWalletTransactionExport;
 use App\Http\Controllers\Controller;
 use Brian2694\Toastr\Facades\Toastr;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Support\Facades\Validator;
 
@@ -26,18 +32,151 @@ class CustomerWalletController extends Controller
         return view('admin-views.customer.wallet.add_fund');
     }
 
+    /**
+     * Build the JSON error shape the add_fund blade actually consumes.
+     *
+     * The view iterates `data.errors[i].message`, so the payload must be a LIST
+     * of objects. HTTP 200 is intentional: the handler inspects the body only,
+     * and a non-200 would leave the operator with no feedback at all.
+     */
+    private function fund_error(string $message)
+    {
+        return response()->json(['errors' => [
+            ['code' => 'add_fund', 'message' => $message],
+        ]], 200);
+    }
+
+    /**
+     * Admin manual wallet funding. Hardened in phase B.4.
+     *
+     * Order is deliberate and must not be rearranged:
+     *   auth (middleware) -> module permission (middleware) -> password ->
+     *   validation -> transaction -> status/idempotency -> wallet -> audit -> commit
+     *
+     * Password failures are audited because they are security events.
+     * Ordinary validation failures are not.
+     */
     public function add_fund(Request $request)
     {
+        $admin = auth('admin')->user();
+
+        // --- Step 3: password re-authentication -----------------------------
+        // Throttled per admin id, never per IP: multiple administrators commonly
+        // share one public IP and must not lock each other out.
+        $throttle_key = 'admin-fund-password:' . ($admin->id ?? 'unknown');
+
+        if (RateLimiter::tooManyAttempts($throttle_key, 5)) {
+            $seconds = RateLimiter::availableIn($throttle_key);
+            AuditLog::record(
+                'admin_wallet_fund_locked', 'User', null, null, null, null,
+                ['seconds_remaining' => $seconds, 'endpoint' => $request->path()]
+            );
+            return $this->fund_error(trans('messages.too_many_password_attempts') . ' ' . $seconds . 's');
+        }
+
+        if (!$request->filled('admin_password') || !Hash::check($request->admin_password, $admin->password)) {
+            RateLimiter::hit($throttle_key, 300);
+            AuditLog::record(
+                'admin_wallet_fund_denied', 'User', null, null, null, null,
+                [
+                    'reason'              => 'invalid_password',
+                    'target_customer_id'  => $request->customer_id,
+                    'attempts_remaining'  => RateLimiter::remaining($throttle_key, 5),
+                    'endpoint'            => $request->path(),
+                ]
+            );
+            return $this->fund_error(trans('messages.incorrect_password'));
+        }
+
+        RateLimiter::clear($throttle_key);
+
+        // --- Step 4: validation ---------------------------------------------
+        // `required` was previously absent: a missing customer_id passed the
+        // `exists` rule and reached the wallet engine as null.
+        // `reference` is the mandatory funding reason. No second field exists.
         $validator = Validator::make($request->all(), [
-            'customer_id'=>'exists:users,id',
-            'amount'=>'numeric|min:.01',
+            'customer_id'=>'required|exists:users,id',
+            'amount'=>'required|numeric|min:.01',
+            'reference'=>'required|string|max:255',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => Helpers::error_processor($validator)]);
         }
 
-        $wallet_transaction = CustomerLogic::create_wallet_transaction($request->customer_id, $request->amount, 'add_fund_by_admin',$request->reference);
+        // --- Steps 5-8: transaction, wallet mutation, audit, commit ----------
+        try {
+            $wallet_transaction = DB::transaction(function () use ($request, $admin) {
+                // Serialises concurrent submissions on the same customer.
+                $customer = User::where('id', $request->customer_id)->lockForUpdate()->first();
+
+                if (!$customer) {
+                    throw new \RuntimeException(trans('messages.customer_not_found'));
+                }
+
+                // Existing application status mechanism (users.status), the same
+                // flag the customer auth flow enforces. No new state introduced.
+                if (!$customer->status) {
+                    throw new \RuntimeException(trans('messages.customer_account_is_inactive'));
+                }
+
+                // Idempotency: a double submit inside the lock window is rejected
+                // once the first has committed, so a duplicate credit is impossible.
+                $duplicate = WalletTransaction::where('user_id', $customer->id)
+                    ->where('transaction_type', 'add_fund_by_admin')
+                    ->where('credit', (float) $request->amount)
+                    ->where('reference', $request->reference)
+                    ->where('created_at', '>=', now()->subMinutes(2))
+                    ->first();
+
+                if ($duplicate) {
+                    throw new \RuntimeException(trans('messages.duplicate_fund_request_ignored'));
+                }
+
+                $balance_before = $customer->wallet_balance;
+
+                // CustomerLogic returns false instead of throwing, so a falsy
+                // result must abort this transaction explicitly.
+                $transaction = CustomerLogic::create_wallet_transaction(
+                    $customer->id, (float) $request->amount, 'add_fund_by_admin', $request->reference
+                );
+
+                if (!$transaction) {
+                    throw new \RuntimeException(trans('messages.failed_to_create_transaction'));
+                }
+
+                // Audited inside the transaction: unlike B.1 there is no external
+                // side effect here, so money and its audit row commit atomically.
+                AuditLog::record(
+                    'admin_wallet_fund',
+                    'User',
+                    $customer->id,
+                    ['wallet_balance' => $balance_before],
+                    ['wallet_balance' => $customer->fresh()->wallet_balance],
+                    null,
+                    [
+                        'amount'         => (float) $request->amount,
+                        'reference'      => $request->reference,
+                        'transaction_id' => is_object($transaction) ? ($transaction->transaction_id ?? null) : null,
+                        'endpoint'       => $request->path(),
+                    ]
+                );
+
+                return $transaction;
+            });
+        } catch (\RuntimeException $ex) {
+            // Deliberate, user-facing refusals.
+            return $this->fund_error($ex->getMessage());
+        } catch (\Throwable $ex) {
+            // Unexpected failure: detail to the log, generic message to the operator.
+            Log::error('Admin wallet funding failed', [
+                'admin_id'    => $admin->id ?? null,
+                'customer_id' => $request->customer_id,
+                'amount'      => $request->amount,
+                'error'       => $ex->getMessage(),
+            ]);
+            return $this->fund_error(trans('messages.failed_to_create_transaction'));
+        }
 
         if($wallet_transaction)
         {
@@ -54,9 +193,7 @@ class CustomerWalletController extends Controller
             return response()->json([], 200);
         }
 
-        return response()->json(['errors'=>[
-            'message'=>trans('messages.failed_to_create_transaction')
-        ]], 200);
+        return $this->fund_error(trans('messages.failed_to_create_transaction'));
     }
 
     public function report(Request $request)

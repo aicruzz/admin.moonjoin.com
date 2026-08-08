@@ -983,8 +983,9 @@
                                                 <strong>{{ translate('Only click these buttons when you are sure all items are available or after adjusting the cart.') }}</strong>
                                             </div>
 
-                                            {{-- Claim Button --}}
-                                            @if ($order->claim_status === 'claimed')
+                                            {{-- Claim Button. Server remains authoritative; this only hides what the actor cannot do. --}}
+                                            @if (!\App\CentralLogics\Helpers::actor_can('claim'))
+                                            @elseif ($order->claim_status === 'claimed')
                                                 <button type="button" class="btn btn--success w-100 mb-2" disabled>
                                                     <i class="tio-checkmark-circle"></i> {{ translate('Funds Claimed') }}
                                                 </button>
@@ -999,8 +1000,9 @@
                                                 </form>
                                             @endif
 
-                                            {{-- Pay Button --}}
-                                            @if ($order->pay_status === 'paid')
+                                            {{-- Pay Button. Hidden unless the actor holds the payout capability. --}}
+                                            @if (!\App\CentralLogics\Helpers::actor_can('payout'))
+                                            @elseif ($order->pay_status === 'paid')
                                                 <button type="button" class="btn btn--success w-100 mb-2" disabled>
                                                     <i class="tio-checkmark-circle"></i> {{ translate('Payout Done') }}
                                                 </button>

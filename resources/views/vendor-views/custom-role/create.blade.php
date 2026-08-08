@@ -131,6 +131,20 @@
                                                     <label class="form-check-label qcont text-dark" for="order">{{translate('messages.All Orders')}}</label>
                                                 </div>
                                             </div>
+                                            <div class="check-item p-2">
+                                                <div class="form-group form-check form--check m-0">
+                                                    <input type="checkbox" name="modules[]" value="claim" class="form-check-input rounded"
+                                                        id="claim">
+                                                    <label class="form-check-label qcont text-dark" for="claim">{{translate('messages.Claim Funds')}}</label>
+                                                </div>
+                                            </div>
+                                            <div class="check-item p-2">
+                                                <div class="form-group form-check form--check m-0">
+                                                    <input type="checkbox" name="modules[]" value="payout" class="form-check-input rounded"
+                                                        id="payout">
+                                                    <label class="form-check-label qcont text-dark" for="payout">{{translate('messages.Payout')}}</label>
+                                                </div>
+                                            </div>
                                             @if (\App\CentralLogics\Helpers::employee_module_permission_check('pos'))
                                             <div class="check-item p-2">
                                                 <div class="form-group form-check form--check m-0">

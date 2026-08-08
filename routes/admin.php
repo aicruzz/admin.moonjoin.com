@@ -274,7 +274,10 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
 
         Route::get('order/generate-invoice/{id}', 'OrderController@generate_invoice')->name('order.generate-invoice');
         Route::get('order/print-invoice/{id}', 'OrderController@print_invoice')->name('order.print-invoice');
-        Route::get('order/status', 'OrderController@status')->name('order.status');
+        // B.5: POST-only. This endpoint mutates order state and can credit a
+        // customer wallet, so it must not be reachable by GET (CSRF-exempt).
+        // module:order was missing here while every sibling order route has it.
+        Route::post('order/status', 'OrderController@status')->name('order.status')->middleware('module:order');
         Route::get('order/offline-payment', 'OrderController@offline_payment')->name('order.offline_payment');
         Route::group(['prefix' => 'order', 'as' => 'order.', 'middleware' => ['module:order']], function () {
             Route::get('list/{status}', 'OrderController@list')->name('list');

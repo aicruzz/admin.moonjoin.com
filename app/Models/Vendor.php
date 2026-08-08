@@ -113,12 +113,26 @@ class Vendor extends Authenticatable
         return $this->morphMany(Storage::class, 'data');
     }
 
+    public function permission()
+    {
+        return $this->hasOne(VendorPermission::class, 'vendor_id');
+    }
+
     protected static function booted()
     {
         static::addGlobalScope('storage', function ($builder) {
             $builder->with('storage');
         });
 
+        // Every vendor must always have a permission record. The resolver does
+        // no runtime defaulting, so this guarantees the invariant for vendors
+        // created after the seeding migration ran.
+        static::created(function ($vendor) {
+            VendorPermission::firstOrCreate(
+                ['vendor_id' => $vendor->id],
+                ['modules' => VendorPermission::DEFAULT_MODULES]
+            );
+        });
     }
     protected static function boot()
     {

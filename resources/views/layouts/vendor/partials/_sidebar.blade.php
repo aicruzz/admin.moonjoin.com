@@ -691,6 +691,20 @@
                     @endif
                     <!-- End Employee Section -->
 
+                    <!-- Owner Permission Section -->
+                    {{-- Owner-only: employees receive capabilities through their role, and
+                         must never reach the screen that grants financial capabilities. --}}
+                    @if (auth('vendor')->check() && \App\CentralLogics\Helpers::employee_module_permission_check('role'))
+                        <li class="nav-item {{ Request::is('vendor-panel/permission') ? 'active' : '' }}">
+                            <a class="js-nav-tooltip-link nav-link" href="{{ route('vendor.permission.index') }}"
+                                title="{{ translate('messages.Owner_Permissions') }}">
+                                <i class="tio-user-switch nav-icon"></i>
+                                <span class="text-truncate">{{ translate('messages.Owner_Permissions') }}</span>
+                            </a>
+                        </li>
+                    @endif
+                    <!-- End Owner Permission Section -->
+
                     <!-- Report Section -->
                     @if (
                             \App\CentralLogics\Helpers::employee_module_permission_check('expense_report') ||

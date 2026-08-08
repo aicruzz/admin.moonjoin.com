@@ -1156,7 +1156,7 @@
                             `${statusRoute}?id=${orderID}&order_status=canceled&reason=${reason}`;
 
                         // Redirect the user to the generated URL
-                        window.location.href = redirectURL;
+                        post_to_route(redirectURL);
                     }
                 });
             });

@@ -1147,7 +1147,7 @@
                                             (($refund && $refund->value == true) || $order->order_status == 'refund_requested') &&
                                                 $order->payment_status == 'paid' &&
                                                 $order->order_status != 'refunded')
-                                            <button class="btn btn--primary btn--sm route-alert"
+                                            <button class="btn btn--primary btn--sm route-alert-post"
                                                     data-url="{{ route('admin.order.status', ['id' => $order['id'],'order_status' => 'refunded',
                                             ]) }}" data-message="{{ translate('messages.you_want_to_refund_this_order', ['amount' => $refund_amount . ' ' . \App\CentralLogics\Helpers::currency_code()]) }}" data-title="{{ translate('messages.are_you_sure_want_to_refund') }}"
                                             ><i
@@ -1276,10 +1276,10 @@
                                                     </button>
                                                     @php($order_delivery_verification = (bool) \App\Models\BusinessSetting::where(['key' => 'order_delivery_verification'])->first()->value)
                                                     <div class="dropdown-menu text-capitalize" aria-labelledby="dropdownMenuButton">
-                                                        <a class="dropdown-item {{ $order['order_status'] == 'pending' ? 'active' : '' }} route-alert"
+                                                        <a class="dropdown-item {{ $order['order_status'] == 'pending' ? 'active' : '' }} route-alert-post"
                                                         data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'pending']) }}" data-message="{{ translate('Change status to pending ?') }}"
                                                         href="javascript:">{{ translate('messages.pending') }}</a>
-                                                        <a class="dropdown-item {{ $order['order_status'] == 'confirmed' ? 'active' : '' }} route-alert"
+                                                        <a class="dropdown-item {{ $order['order_status'] == 'confirmed' ? 'active' : '' }} route-alert-post"
                                                         data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'confirmed']) }}" data-message="{{ translate('Change status to confirmed ?') }}"
                                                         href="javascript:">{{ translate('messages.confirmed') }}</a>
                                                         @if ($order->order_type != 'parcel')
@@ -1287,18 +1287,18 @@
                                                                 <a class="dropdown-item {{ $order['order_status'] == 'processing' ? 'active' : '' }} order_status_change_alert" data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'processing']) }}" data-message="{{ translate('Change status to cooking ?') }}" data-processing={{ $max_processing_time }}
                                                                 href="javascript:">{{ translate('messages.processing') }}</a>
                                                             @else
-                                                                <a class="dropdown-item {{ $order['order_status'] == 'processing' ? 'active' : '' }} route-alert"
+                                                                <a class="dropdown-item {{ $order['order_status'] == 'processing' ? 'active' : '' }} route-alert-post"
                                                                 data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'processing']) }}" data-message="{{ translate('Change status to processing ?') }}"
                                                                 href="javascript:">{{ translate('messages.processing') }}</a>
                                                             @endif
-                                                            <a class="dropdown-item {{ $order['order_status'] == 'handover' ? 'active' : '' }} route-alert"
+                                                            <a class="dropdown-item {{ $order['order_status'] == 'handover' ? 'active' : '' }} route-alert-post"
                                                             data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'handover']) }}" data-message="{{ translate('Change status to handover ?') }}"
                                                             href="javascript:">{{ translate('messages.handover') }}</a>
                                                         @endif
-                                                        <a class="dropdown-item {{ $order['order_status'] == 'picked_up' ? 'active' : '' }} route-alert"
+                                                        <a class="dropdown-item {{ $order['order_status'] == 'picked_up' ? 'active' : '' }} route-alert-post"
                                                         data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'picked_up']) }}" data-message="{{ translate('Change status to out for delivery ?') }}"
                                                         href="javascript:">{{ translate('messages.out_for_delivery') }}</a>
-                                                        <a class="dropdown-item {{ $order['order_status'] == 'delivered' ? 'active' : '' }} route-alert"
+                                                        <a class="dropdown-item {{ $order['order_status'] == 'delivered' ? 'active' : '' }} route-alert-post"
                                                         data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'delivered']) }}" data-message="{{ translate('Change status to delivered (payment status will be paid if not)?') }}"
                                                         href="javascript:">{{ translate('messages.delivered') }}</a>
                                                         <a class="dropdown-item {{ $order['order_status'] == 'canceled' ? 'active' : '' }} canceled-status">{{ translate('messages.canceled') }}</a>
@@ -2160,7 +2160,8 @@
                             <span aria-hidden="true">&times;</span>
                         </button>
                     </div>
-                    <form action="{{ route('admin.order.status') }}" method="get">
+                    <form action="{{ route('admin.order.status') }}" method="post">
+                        @csrf
                         <input type="hidden" name="id" value="{{ $order['id'] }}">
                         <input type="hidden" name="order_status" value="canceled">
                         <div class="modal-body">
@@ -2607,7 +2608,7 @@
                     html: message + '<br/>'+'<label>{{ translate('Enter Processing time in minutes') }}</label>',
                     inputValue: processing,
                     preConfirm: (processing_time) => {
-                        location.href = route + '&processing_time=' + processing_time;
+                        post_to_route(route + '&processing_time=' + processing_time);
                     },
                     allowOutsideClick: () => !Swal.isLoading()
                 })
@@ -2624,7 +2625,7 @@
                     reverseButtons: true
                 }).then((result) => {
                     if (result.value) {
-                        location.href = route;
+                        post_to_route(route);
                     }
                 })
             }

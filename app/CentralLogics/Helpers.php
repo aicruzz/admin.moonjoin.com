@@ -2241,8 +2241,67 @@ class Helpers
         return false;
     }
 
+    /**
+     * Capabilities resolved through actor_can() rather than the legacy module
+     * path. Exact string membership only -- no wildcards, prefixes or partial
+     * matching -- so every other module keeps its existing behaviour untouched.
+     */
+    public const ACTOR_RESOLVED_MODULES = ['claim', 'payout'];
+
+    /**
+     * Single entry point for "may the current actor do X?".
+     *
+     * Callers never branch on actor type; the dispatch happens here once.
+     * A vendor owner resolves against vendor_permissions.modules, a vendor
+     * employee against their employee role's modules.
+     *
+     * No runtime defaulting: a vendor without a permission record is a
+     * deployment fault, not a permission decision, and raises rather than
+     * silently granting or denying a financial capability.
+     */
+    public static function actor_can(string $module): bool
+    {
+        if (auth('vendor_employee')->check()) {
+            $modules = auth('vendor_employee')->user()->role->modules ?? null;
+
+            return is_array(json_decode((string) $modules))
+                && in_array($module, (array) json_decode((string) $modules), true);
+        }
+
+        if (auth('vendor')->check()) {
+            $vendor = auth('vendor')->user();
+            $permission = \App\Models\VendorPermission::where('vendor_id', $vendor->id)->first();
+
+            if (!$permission) {
+                // Still fail loudly -- this is a deployment fault, never an
+                // authorization decision. The diagnosable detail goes to the log;
+                // the vendor sees a generic message, since migration and schema
+                // internals must not surface in the UI.
+                \Illuminate\Support\Facades\Log::critical('Missing vendor_permissions record', [
+                    'vendor_id' => $vendor->id,
+                    'module'    => $module,
+                    'action'    => 'Run the vendor permission migration and verify vendors == vendor_permissions.',
+                ]);
+
+                throw new \RuntimeException(translate('messages.financial_permissions_unavailable_try_again_later'));
+            }
+
+            return $permission->grants($module);
+        }
+
+        return false;
+    }
+
     public static function employee_module_permission_check($mod_name)
     {
+        // Narrow exception: claim and payout resolve through actor_can() so the
+        // owner's stored permissions are honoured instead of the unconditional
+        // grant below. Exact match on two strings; every other module falls
+        // through to the original logic unchanged.
+        if (in_array($mod_name, self::ACTOR_RESOLVED_MODULES, true)) {
+            return self::actor_can($mod_name);
+        }
+
         if (auth('vendor')->check()) {
             if ($mod_name == 'reviews') {
                 return auth('vendor')->user()->stores[0]->reviews_section;

@@ -402,6 +402,51 @@ if(in_array(config('module.current_module_type'),config('module.module_type') ))
         })
     }
 
+    // B.5: state-changing routes must not be reachable by GET navigation.
+    // Builds and submits a CSRF-protected POST form for the given URL.
+    // route_alert() above is deliberately left unchanged: it is shared by six
+    // admin views for actions outside B.5 scope.
+    function post_to_route(route) {
+        let form = document.createElement('form');
+        form.method = 'POST';
+        form.action = route;
+
+        let token = document.createElement('input');
+        token.type = 'hidden';
+        token.name = '_token';
+        token.value = '{{ csrf_token() }}';
+        form.appendChild(token);
+
+        document.body.appendChild(form);
+        form.submit();
+    }
+
+    // POST counterpart of route_alert(), used by order-status controls.
+    function route_alert_post(route, message, title = "{{ translate('messages.are_you_sure') }}") {
+        Swal.fire({
+            title: title,
+            text: message,
+            type: 'warning',
+            showCancelButton: true,
+            cancelButtonColor: 'default',
+            confirmButtonColor: '#FC6A57',
+            cancelButtonText: '{{ translate('messages.no') }}',
+            confirmButtonText: '{{ translate('messages.Yes') }}',
+            reverseButtons: true
+        }).then((result) => {
+            if (result.value) {
+                post_to_route(route);
+            }
+        })
+    }
+
+    $(document).on('click', '.route-alert-post', function () {
+        let route = $(this).data('url');
+        let message = $(this).data('message');
+        let title = $(this).data('title');
+        title ? route_alert_post(route, message, title) : route_alert_post(route, message);
+    });
+
     $('.form-alert').on('click', function () {
         let id = $(this).data('id');
         let title = $(this).data('title');

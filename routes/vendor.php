@@ -76,6 +76,14 @@ Route::group(['namespace' => 'Vendor', 'as' => 'vendor.'], function () {
             Route::get('export-sub-categories', 'CategoryController@export_sub_categories')->name('export-sub-categories');
         });
 
+        // Owner-only capability management. Gated on module:role, the same
+        // permission that already governs employee role management, so a vendor
+        // who can manage roles can manage their own capabilities.
+        Route::group(['prefix' => 'permission', 'as' => 'permission.', 'middleware' => ['module:role', 'subscription:role']], function () {
+            Route::get('/', 'VendorPermissionController@index')->name('index');
+            Route::post('update', 'VendorPermissionController@update')->name('update');
+        });
+
         Route::group(['prefix' => 'custom-role', 'as' => 'custom-role.', 'middleware' => ['module:role', 'subscription:role']], function () {
             Route::get('create', 'CustomRoleController@create')->name('create');
             Route::post('create', 'CustomRoleController@store')->name('store');

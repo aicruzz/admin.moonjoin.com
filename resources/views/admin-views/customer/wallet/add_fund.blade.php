@@ -51,9 +51,26 @@
                         </div>
                         <div class="col-12">
                             <div class="form-group">
-                                <label class="input-label" for="reference">{{translate('messages.reference')}} <small>({{translate('messages.optional')}})</small></label>
+                                <label class="input-label" for="reference">{{translate('messages.reference')}}
+                                    <span class="form-label-secondary text-danger"
+                                          data-toggle="tooltip" data-placement="right"
+                                          data-original-title="{{ translate('messages.Required.')}}"> *
+                            </span>
+                                </label>
 
-                                <input type="text" placeholder="{{ translate('Ex: 123') }}" class="form-control" name="reference" id="reference">
+                                <input type="text" placeholder="{{ translate('messages.Reason for this funding') }}" class="form-control" name="reference" id="reference" maxlength="255" required>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-group">
+                                <label class="input-label" for="admin_password">{{translate('messages.Confirm your password')}}
+                                    <span class="form-label-secondary text-danger"
+                                          data-toggle="tooltip" data-placement="right"
+                                          data-original-title="{{ translate('messages.Required.')}}"> *
+                            </span>
+                                </label>
+
+                                <input type="password" placeholder="{{ translate('messages.Your admin account password') }}" class="form-control" name="admin_password" id="admin_password" autocomplete="off" required>
                             </div>
                         </div>
                     </div>

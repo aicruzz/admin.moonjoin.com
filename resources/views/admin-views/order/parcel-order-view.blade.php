@@ -633,20 +633,20 @@
 
                                             <div class="dropdown-menu text-capitalize"
                                                 aria-labelledby="dropdownMenuButton">
-                                                <a class="dropdown-item {{ $order['order_status'] == 'pending' ? 'active' : '' }} {{ $order['order_status'] == 'canceled' ? 'disabled' : '' }} route-alert"
+                                                <a class="dropdown-item {{ $order['order_status'] == 'pending' ? 'active' : '' }} {{ $order['order_status'] == 'canceled' ? 'disabled' : '' }} route-alert-post"
                                                     data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'pending']) }}"
                                                     data-message="{{ translate('Change status to pending ?') }}"
                                                     href="javascript:">{{ translate('messages.pending') }}</a>
-                                                <a class="dropdown-item {{ in_array($order['order_status'], ['accepted', 'confirmed', 'handover']) ? 'active' : '' }} route-alert {{ $order['order_status'] == 'canceled' ? 'disabled' : '' }}"
+                                                <a class="dropdown-item {{ in_array($order['order_status'], ['accepted', 'confirmed', 'handover']) ? 'active' : '' }} route-alert-post {{ $order['order_status'] == 'canceled' ? 'disabled' : '' }}"
                                                     data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'confirmed']) }}"
                                                     data-message="{{ translate('Change status to confirmed ?') }}"
                                                     href="javascript:">{{ translate('messages.confirmed') }}</a>
 
-                                                <a class="dropdown-item {{ $order['order_status'] == 'picked_up' ? 'active' : '' }} route-alert {{ $order['order_status'] == 'canceled' ? 'disabled' : '' }}"
+                                                <a class="dropdown-item {{ $order['order_status'] == 'picked_up' ? 'active' : '' }} route-alert-post {{ $order['order_status'] == 'canceled' ? 'disabled' : '' }}"
                                                     data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'picked_up']) }}"
                                                     data-message="{{ translate('Change status to out for delivery ?') }}"
                                                     href="javascript:">{{ translate('messages.out_for_delivery') }}</a>
-                                                <a class="dropdown-item {{ $order['order_status'] == 'delivered' ? 'active' : '' }} route-alert {{ $order['order_status'] == 'canceled' ? 'disabled' : '' }}"
+                                                <a class="dropdown-item {{ $order['order_status'] == 'delivered' ? 'active' : '' }} route-alert-post {{ $order['order_status'] == 'canceled' ? 'disabled' : '' }}"
                                                     data-url="{{ route('admin.order.status', ['id' => $order['id'], 'order_status' => 'delivered']) }}"
                                                     data-message="{{ translate('Change status to delivered (payment status will be paid if not)?') }}"
                                                     href="javascript:">{{ translate('messages.delivered') }}</a>

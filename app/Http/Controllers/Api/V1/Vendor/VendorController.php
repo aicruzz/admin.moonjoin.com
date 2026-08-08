@@ -970,6 +970,20 @@ class VendorController extends Controller
     }
     public function edit_order_amount(Request $request)
     {
+        // Financial freeze: the settlement figure is fixed once funds are claimed.
+        // Runs before validation and before either the order_amount or
+        // discount_amount branch, so no recalculation, wallet settlement or
+        // transaction can start after claim. A missing order_id yields no match
+        // here and falls through to the validator below, preserving its 403.
+        $frozen_order = Order::find($request->order_id);
+        if ($frozen_order && $frozen_order->claim_status === 'claimed') {
+            return response()->json([
+                'errors' => [
+                    ['code' => 'order', 'message' => translate('messages.order_is_financially_locked_after_claim')]
+                ]
+            ], 403);
+        }
+
         $validator = Validator::make($request->all(), [
             'order_id' => 'required',
         ]);
@@ -977,6 +991,7 @@ class VendorController extends Controller
         if ($validator->fails()) {
             return response()->json(['errors' => Helpers::error_processor($validator)], 403);
         }
+
         $orderTaxIds = [];
         $additionalCharges = [];
         if ($request->order_amount) {
@@ -1139,15 +1154,36 @@ class VendorController extends Controller
             $order->order_amount = round($total_price + $order->total_tax_amount + $order->delivery_charge, config('round_up_to_digit'));
             $order->free_delivery_by = $free_delivery_by;
             $order->order_amount = $order->order_amount + $order->dm_tips + $order->additional_charge;
-            $order->save();
 
             $difference = $order->order_amount - $old_order_amount;
-            if ($difference != 0 && ($order->payment_method == 'wallet' || $order->payment_status == 'paid')) {
-                if ($difference > 0) {
-                    \App\CentralLogics\CustomerLogic::create_wallet_transaction($order->user_id, $difference, 'order_place', 'Order amount edited (increased) via API for order ID: ' . $order->id);
-                } else if ($difference < 0) {
-                    \App\CentralLogics\CustomerLogic::create_wallet_transaction($order->user_id, abs($difference), 'order_refund', 'Order amount edited (decreased) via API for order ID: ' . $order->id);
+
+            // Save and settle together so an insufficient balance, a disabled
+            // wallet or a failed settlement cannot leave the order amount changed
+            // with no money moved.
+            DB::beginTransaction();
+            try {
+                $order->save();
+
+                $settlement = $this->applyOrderEditWalletSettlement($order, $difference);
+                if (!$settlement['ok']) {
+                    DB::rollBack();
+
+                    return response()->json([
+                        'errors' => [
+                            ['code' => $settlement['code'], 'message' => $settlement['message']]
+                        ]
+                    ], 403);
                 }
+
+                DB::commit();
+            } catch (\Throwable $th) {
+                DB::rollBack();
+
+                return response()->json([
+                    'errors' => [
+                        ['code' => 'order', 'message' => $th->getMessage()]
+                    ]
+                ], 500);
             }
         }
 
@@ -1240,16 +1276,42 @@ class VendorController extends Controller
 
             $order->discount_on_product_by = 'vendor';
             $order->store_discount_amount = round($request->discount_amount, config('round_up_to_digit'));
-            $order->order_amount = $product_price + $order['delivery_charge'] + $order['total_tax_amount'] + $order['dm_tips'] - $order->store_discount_amount + $order->additional_charge;
-            $order->save();
 
-            $difference = $order->order_amount - $old_order_amount;
-            if ($difference != 0 && ($order->payment_method == 'wallet' || $order->payment_status == 'paid')) {
-                if ($difference > 0) {
-                    \App\CentralLogics\CustomerLogic::create_wallet_transaction($order->user_id, $difference, 'order_place', 'Order amount edited (increased) via API for order ID: ' . $order->id);
-                } else if ($difference < 0) {
-                    \App\CentralLogics\CustomerLogic::create_wallet_transaction($order->user_id, abs($difference), 'order_refund', 'Order amount edited (decreased) via API for order ID: ' . $order->id);
+            // Baseline for this branch. Previously $old_order_amount was only ever
+            // assigned inside the order_amount branch above, so a discount-only
+            // request read an undefined variable, and a request carrying both
+            // fields measured this difference against a stale baseline and
+            // double-counted the first branch's change.
+            $discount_old_order_amount = $order->getOriginal('order_amount');
+
+            $order->order_amount = $product_price + $order['delivery_charge'] + $order['total_tax_amount'] + $order['dm_tips'] - $order->store_discount_amount + $order->additional_charge;
+
+            $difference = $order->order_amount - $discount_old_order_amount;
+
+            DB::beginTransaction();
+            try {
+                $order->save();
+
+                $settlement = $this->applyOrderEditWalletSettlement($order, $difference);
+                if (!$settlement['ok']) {
+                    DB::rollBack();
+
+                    return response()->json([
+                        'errors' => [
+                            ['code' => $settlement['code'], 'message' => $settlement['message']]
+                        ]
+                    ], 403);
                 }
+
+                DB::commit();
+            } catch (\Throwable $th) {
+                DB::rollBack();
+
+                return response()->json([
+                    'errors' => [
+                        ['code' => 'order', 'message' => $th->getMessage()]
+                    ]
+                ], 500);
             }
         }
         $order?->orderTaxes()?->delete();
@@ -1499,5 +1561,132 @@ class VendorController extends Controller
         ];
 
         return response()->json($data, 200);
+    }
+
+    /**
+     * Wallet settlement for an order edit.
+     *
+     * Assembled from existing MoonJoin production patterns rather than a new design:
+     *   - balance guard      : Admin\OrderController::update()      (abort + notify customer)
+     *   - return-value check : Vendor\WebVendorCartController       (create_wallet_transaction() === false)
+     *   - idempotency        : Vendor\EmployeeWalletController      (lockForUpdate + time-window dedupe)
+     *
+     * Must be called inside an open transaction so the lock is held and the
+     * caller can roll the order back when this returns ok = false.
+     *
+     * @return array{ok: bool, code: string, message: string}
+     */
+    private function applyOrderEditWalletSettlement(Order $order, float $difference): array
+    {
+        $ok = ['ok' => true, 'code' => 'order', 'message' => ''];
+
+        // A zero-difference edit moves no money.
+        if ($difference == 0.0) {
+            return $ok;
+        }
+
+        if (!($order->payment_method == 'wallet' || $order->payment_status == 'paid')) {
+            return $ok;
+        }
+
+        // Lock the balance holder so two concurrent edits cannot both read the
+        // same wallet_balance.
+        $user = DB::table('users')->where('id', $order->user_id)->lockForUpdate()->first();
+        if (!$user) {
+            return ['ok' => false, 'code' => 'customer', 'message' => translate('messages.not_found')];
+        }
+
+        $isDebit   = $difference > 0;
+        $amount    = abs($difference);
+        $type      = $isDebit ? 'order_place' : 'order_refund';
+        $reference = $isDebit
+            ? 'Order amount edited (increased) via API for order ID: ' . $order->id
+            : 'Order amount edited (decreased) via API for order ID: ' . $order->id;
+
+        // Balance guard on debits only, matching Admin Order Edit.
+        if ($isDebit && $user->wallet_balance < $amount) {
+            $this->sendOrderEditWalletNotification($order, [
+                'title' => translate('messages.insufficient_wallet_balance'),
+                'description' => translate('messages.your_wallet_balance_is_insufficient_to_cover_the_additional_amount_of_')
+                    . Helpers::format_currency($amount)
+                    . translate('messages._please_fund_your_wallet_to_process_this_order_edit.'),
+                'order_id' => (string) $order->id,
+                'image' => '',
+                'type' => 'order_status',
+            ]);
+
+            return [
+                'ok' => false,
+                'code' => 'wallet',
+                'message' => translate('messages.customer_has_insufficient_wallet_balance'),
+            ];
+        }
+
+        // Idempotency: an identical settlement inside the window is a replay of
+        // the same request, not a second charge.
+        $duplicate = DB::table('wallet_transactions')
+            ->where('user_id', $order->user_id)
+            ->where('transaction_type', $type)
+            ->where('reference', $reference)
+            ->where($isDebit ? 'debit' : 'credit', $amount)
+            ->where('created_at', '>=', now()->subMinutes(2))
+            ->first();
+
+        if ($duplicate) {
+            \Log::warning('ORDER EDIT IDEMPOTENCY LOCK TRIGGERED - reusing settlement', [
+                'order_id' => $order->id,
+                'wallet_transaction_id' => $duplicate->id,
+            ]);
+
+            return $ok;
+        }
+
+        $status = \App\CentralLogics\CustomerLogic::create_wallet_transaction($order->user_id, $amount, $type, $reference);
+
+        // create_wallet_transaction() returns false when the wallet feature is
+        // switched off. Ignoring it would change the order amount without moving
+        // any money.
+        if (!$status) {
+            return [
+                'ok' => false,
+                'code' => 'wallet',
+                'message' => translate('messages.wallet_transaction_failed'),
+            ];
+        }
+
+        $formattedAmount = Helpers::format_currency($amount);
+        $this->sendOrderEditWalletNotification($order, [
+            'title' => $isDebit ? translate('messages.wallet_debited') : translate('messages.wallet_credited'),
+            'description' => $isDebit
+                ? $formattedAmount . ' ' . translate('messages.has_been_charged_from_your_wallet') . '. ' . translate('messages.reason') . ': ' . $reference
+                : $formattedAmount . ' ' . translate('messages.has_been_refunded_to_your_wallet') . '. ' . translate('messages.reason') . ': ' . $reference,
+            'order_id' => (string) $order->id,
+            'image' => '',
+            'type' => 'wallet_change',
+        ]);
+
+        return $ok;
+    }
+
+    /**
+     * Push + in-app notification, mirroring
+     * Vendor\OrderController::sendOrderWalletChangeNotification().
+     */
+    private function sendOrderEditWalletNotification(Order $order, array $notification_data): void
+    {
+        try {
+            DB::table('user_notifications')->insert([
+                'data' => json_encode($notification_data),
+                'user_id' => $order->user_id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            if ($order->customer && $order->customer->cm_firebase_token) {
+                Helpers::send_push_notif_to_device($order->customer->cm_firebase_token, $notification_data);
+            }
+        } catch (\Exception $e) {
+            info('Order edit wallet notification failed: ' . $e->getMessage());
+        }
     }
 }

@@ -28,6 +28,9 @@ use App\Models\BusinessSetting;
 use App\CentralLogics\OrderLogic;
 use App\CentralLogics\CouponLogic;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use App\Models\AuditLog;
+use App\Models\User;
 use App\CentralLogics\ProductLogic;
 use App\CentralLogics\CustomerLogic;
 use App\Http\Controllers\Controller;
@@ -347,11 +350,31 @@ class OrderController extends Controller
     }
     public function switch_to_cod($id)
     {
-        $order = Order::where('id', $id)->first();
-        if ($order) {
+        // B.6: this method force-resets order_status to 'pending' and flips the order
+        // to COD. Production order 100002 (claimed, 8,300, COD, processing 17:18:00 ->
+        // pending 17:49:53) was produced here: a claimed order driven backwards out of
+        // 'processing', leaving the vendor able to collect cash from the customer AND
+        // still draw the platform payout. The claim check and the mutation run inside
+        // one locked transaction so a concurrent claim cannot slip between them.
+        $blocked = null;
+        $order = null;
+
+        DB::transaction(function () use ($id, &$blocked, &$order) {
+            $order = Order::where('id', $id)->lockForUpdate()->first();
+
+            if (!$order) {
+                $blocked = 'not_found';
+                return;
+            }
+
             if ($order->payment_method == 'cash_on_delivery') {
-                Toastr::error(translate('messages.order_already_switched_to_cod'));
-                return back();
+                $blocked = 'already_cod';
+                return;
+            }
+
+            if ($order->claim_status === 'claimed') {
+                $blocked = 'claimed';
+                return;
             }
 
             $order?->offline_payments()->delete();
@@ -377,21 +400,33 @@ class OrderController extends Controller
 
             $order->payment_method = 'cash_on_delivery';
             $order->save();
+        });
 
-            if ($order?->is_guest == 0) {
-                $this->sent_mail_on_offline_payment(
-                    status: 'COD',
-                    name: $order?->customer?->f_name . ' ' . $order?->customer?->l_name,
-                    email: $order?->customer?->email,
-                    order_id: $order->id
-                );
-            }
-
-            Toastr::success(translate('messages.order_switched_to_cod'));
+        if ($blocked === 'not_found') {
+            Toastr::error(translate('messages.order_not_found'));
             return back();
         }
 
-        Toastr::error(translate('messages.order_not_found'));
+        if ($blocked === 'already_cod') {
+            Toastr::error(translate('messages.order_already_switched_to_cod'));
+            return back();
+        }
+
+        if ($blocked === 'claimed') {
+            Toastr::error(translate('messages.claimed_order_cannot_switch_to_cod'));
+            return back();
+        }
+
+        if ($order?->is_guest == 0) {
+            $this->sent_mail_on_offline_payment(
+                status: 'COD',
+                name: $order?->customer?->f_name . ' ' . $order?->customer?->l_name,
+                email: $order?->customer?->email,
+                order_id: $order->id
+            );
+        }
+
+        Toastr::success(translate('messages.order_switched_to_cod'));
         return back();
     }
 
@@ -587,31 +622,134 @@ class OrderController extends Controller
                 Toastr::warning(translate('messages.you_can_not_refund_a_cod_order'));
                 return back();
             }
-            if (isset($order->delivered)) {
-                $rt = OrderLogic::refund_order($order);
-                if (!$rt) {
-                    Toastr::warning(translate('messages.faield_to_create_order_transaction'));
-                    return back();
-                }
+            // B.5 financial freeze. A claimed order has been settled to the vendor,
+            // and for pay_status='paid' the 9PSB debit has already left the platform.
+            // OrderLogic::refund_order() reverses only the legacy StoreWallet/AdminWallet
+            // counters: it does not touch claim_status, pay_status, pending_withdraw,
+            // total_withdrawn, or the 9PSB transfer. Refunding here would credit the
+            // customer while the vendor keeps settled funds. A claimed-but-unpaid order
+            // is equally unsafe because pay_vendor_payout() gates on claim_status only
+            // and would still pay out afterwards. There is no safe reversal available
+            // until the escrow/ledger subsystem exists, so this is a hard block.
+            if ($order->claim_status === 'claimed') {
+                Toastr::error(translate('messages.claimed_order_refund_requires_escrow'));
+                return back();
             }
-            $refund_method = $request->refund_method ?? 'manual';
-            $wallet_status = BusinessSetting::where('key', 'wallet_status')->first()->value;
-            $refund_to_wallet = BusinessSetting::where('key', 'wallet_add_refund')->first()->value;
-            if ($order->payment_status == "paid" && $wallet_status == 1 && $refund_to_wallet == 1) {
-                $refund_amount = round($order->order_amount - $order->delivery_charge - $order->dm_tips, config('round_up_to_digit'));
-                CustomerLogic::create_wallet_transaction($order->user_id, $refund_amount, 'order_refund', $order->id);
+
+            $refund_outcome = null;
+
+            try {
+                $refund_outcome = DB::transaction(function () use ($request, $order) {
+                    // Re-read under the lock so concurrent requests cannot both refund.
+                    $locked_order = Order::withOutGlobalScope(ZoneScope::class)
+                        ->where('id', $order->id)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (!$locked_order) {
+                        throw new \RuntimeException(translate('messages.order_not_found'));
+                    }
+
+                    // Idempotency: order_status is only persisted at the end of status(),
+                    // so the unlocked check earlier in this method is not sufficient.
+                    if ($locked_order->order_status === 'refunded') {
+                        throw new \RuntimeException(translate('messages.order_already_refunded'));
+                    }
+
+                    // Freeze re-checked against the locked row.
+                    if ($locked_order->claim_status === 'claimed') {
+                        throw new \RuntimeException(translate('messages.claimed_order_refund_requires_escrow'));
+                    }
+
+                    // Idempotency anchor. status() persists order_status near the end of
+                    // the method, well outside this lock, so the re-read above alone lets
+                    // a second concurrent request refund again. Claiming the transition
+                    // atomically here makes the loser abort before any money moves.
+                    $claimed_transition = Order::where('id', $locked_order->id)
+                        ->where('order_status', '!=', 'refunded')
+                        ->update(['order_status' => 'refunded']);
+
+                    if ($claimed_transition === 0) {
+                        throw new \RuntimeException(translate('messages.order_already_refunded'));
+                    }
+
+                    if (isset($locked_order->delivered)) {
+                        if (!OrderLogic::refund_order($locked_order)) {
+                            throw new \RuntimeException(translate('messages.faield_to_create_order_transaction'));
+                        }
+                    }
+
+                    $refund_method = $request->refund_method ?? 'manual';
+                    $wallet_status = BusinessSetting::where('key', 'wallet_status')->first()->value;
+                    $refund_to_wallet = BusinessSetting::where('key', 'wallet_add_refund')->first()->value;
+                    $refund_amount = null;
+                    $balance_before = null;
+                    $balance_after = null;
+
+                    if ($locked_order->payment_status == "paid" && $wallet_status == 1 && $refund_to_wallet == 1) {
+                        $refund_amount = round($locked_order->order_amount - $locked_order->delivery_charge - $locked_order->dm_tips, config('round_up_to_digit'));
+                        $customer = User::find($locked_order->user_id);
+                        $balance_before = $customer?->wallet_balance;
+
+                        // CustomerLogic returns false instead of throwing. Previously this
+                        // return was discarded and the refund was marked approved anyway.
+                        $credited = CustomerLogic::create_wallet_transaction($locked_order->user_id, $refund_amount, 'order_refund', $locked_order->id);
+
+                        if (!$credited) {
+                            throw new \RuntimeException(translate('messages.failed_to_create_transaction'));
+                        }
+
+                        $balance_after = $customer?->fresh()?->wallet_balance;
+                        $refund_method = 'wallet';
+                    } else {
+                        $refund_method = $request->refund_method ?? 'manual';
+                    }
+
+                    Refund::where('order_id', $locked_order->id)->update([
+                        'order_status' => 'refunded',
+                        'admin_note' => $request->admin_note ?? null,
+                        'refund_status' => 'approved',
+                        'refund_method' => $refund_method,
+                    ]);
+
+                    AuditLog::record(
+                        'admin_order_refund',
+                        'Order',
+                        $locked_order->id,
+                        ['order_status' => $locked_order->order_status, 'wallet_balance' => $balance_before],
+                        ['order_status' => 'refunded', 'wallet_balance' => $balance_after],
+                        null,
+                        [
+                            'customer_id'   => $locked_order->user_id,
+                            'amount'        => $refund_amount,
+                            'refund_method' => $refund_method,
+                            'admin_note'    => $request->admin_note ?? null,
+                            'claim_status'  => $locked_order->claim_status,
+                            'pay_status'    => $locked_order->pay_status,
+                        ]
+                    );
+
+                    return ['refund_method' => $refund_method, 'amount' => $refund_amount];
+                });
+            } catch (\RuntimeException $ex) {
+                Toastr::warning($ex->getMessage());
+                return back();
+            } catch (\Throwable $ex) {
+                Log::error('Admin order refund failed', [
+                    'order_id' => $order->id,
+                    'error'    => $ex->getMessage(),
+                ]);
+                Toastr::warning(translate('messages.failed_to_create_transaction'));
+                return back();
+            }
+
+            if ($refund_outcome['refund_method'] === 'wallet') {
                 Toastr::info(translate('Refunded amount added to customer wallet'));
-                $refund_method = 'wallet';
             } else {
                 Toastr::warning(translate('Customer Wallet Refund is not active.Plase Manage the Refund Amount Manually'));
-                $refund_method = $request->refund_method ?? 'manual';
             }
-            Refund::where('order_id', $order->id)->update([
-                'order_status' => 'refunded',
-                'admin_note' => $request->admin_note ?? null,
-                'refund_status' => 'approved',
-                'refund_method' => $refund_method,
-            ]);
+
+            $order->refresh();
             $order?->store ? Helpers::increment_order_count($order?->store) : '';
 
             if ($order->delivery_man) {
@@ -656,12 +794,49 @@ class OrderController extends Controller
                 return back();
             }
 
+            // B.6 financial freeze, matching the B.5 refund block. The blocklist above
+            // does not include 'processing', which is exactly the state an order is in
+            // when it gets claimed, so a claimed order could be canceled here. Cancel
+            // then calls OrderLogic::refund_before_delivered() further down, crediting
+            // the customer the full order_amount while claim_status/pay_status stay
+            // untouched and the vendor remains payable. Production order 100017 is
+            // that defect already realised.
+            if ($order->claim_status === 'claimed') {
+                Toastr::error(translate('messages.claimed_order_cancel_requires_escrow'));
+                return back();
+            }
+
             $order->cancellation_reason = $request->reason;
             $order->canceled_by = 'admin';
 
             $order?->store ? Helpers::increment_order_count($order?->store) : '';
 
-            if (!empty($order->api_product_id) && in_array($order->escrow_status, [\App\Models\AdminEscrowHolding::STATUS_LOCKED, \App\Models\AdminEscrowHolding::STATUS_HELD], true)) {
+            // Escrow is an unfinished subsystem, deferred to a later phase. Its
+            // tables exist in the database but App\Models\AdminEscrowHolding and
+            // App\Services\Escrow\EscrowService are absent from the codebase, and
+            // the 14 migrations that created those tables are missing from
+            // database/migrations (tracked as "Repository Integrity & Financial
+            // Migration Recovery").
+            //
+            // The branch is unreachable today because no order carries
+            // api_product_id, but referencing the missing class would raise a fatal
+            // Error the moment one did. class_exists() makes that fail safe without
+            // restoring, removing or stubbing any part of the subsystem: the
+            // references below are preserved verbatim for whoever completes it.
+            $escrowAvailable = class_exists(\App\Models\AdminEscrowHolding::class)
+                && class_exists(\App\Services\Escrow\EscrowService::class);
+
+            if (!empty($order->api_product_id) && !$escrowAvailable) {
+                \Illuminate\Support\Facades\Log::error('Admin cancel: escrow subsystem unavailable, refund skipped', [
+                    'order_id'      => $order->id,
+                    'escrow_status' => $order->escrow_status,
+                    'missing'       => 'App\Models\AdminEscrowHolding / App\Services\Escrow\EscrowService',
+                ]);
+                Toastr::error(translate('messages.escrow_refund_failed'));
+                return back();
+            }
+
+            if (!empty($order->api_product_id) && $escrowAvailable && in_array($order->escrow_status, [\App\Models\AdminEscrowHolding::STATUS_LOCKED, \App\Models\AdminEscrowHolding::STATUS_HELD], true)) {
                 try {
                     app(\App\Services\Escrow\EscrowService::class)->refund($order, $request->reason ?? 'admin_cancel');
                 } catch (\Throwable $e) {

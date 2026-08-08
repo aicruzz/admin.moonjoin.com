@@ -777,6 +777,15 @@ class OrderController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        // Financial freeze: the settlement figure is fixed once funds are claimed.
+        // Placed above the status check deliberately. Today the status window ends
+        // before 'processing' and so blocks claimed orders incidentally; once the
+        // approved Order-model change opens editing during an active negotiation
+        // that incidental protection disappears, and this guard is what remains.
+        if ($order->claim_status === 'claimed') {
+            return response()->json(['message' => 'Order cannot be updated after funds have been claimed'], 400);
+        }
+
         if (!in_array($order->order_status, ['pending', 'confirmed'])) {
             return response()->json(['message' => 'Order cannot be updated at this stage'], 400);
         }
@@ -916,29 +925,65 @@ class OrderController extends Controller
             $order->adjusment = $total_order_amount - $old_order_amount;
             $order->order_amount = $total_order_amount;
             $order->edited = true;
+
+            // The customer has now answered the vendor's request, so the
+            // negotiation is closed. Written in the same save() as the amounts so
+            // the state cannot end up half-completed.
+            //
+            // unavailable_item_note is deliberately NOT cleared: it is the
+            // customer's standing checkout instruction ("if an item is
+            // unavailable ..."), written at order placement by
+            // Traits\PlaceNewOrder::new_place_order() and shown read-only in the
+            // app's order details. It is not part of this negotiation.
+            $negotiationWasOpen = (bool) $order->customer_edit_requested;
+            $order->customer_edit_requested = 0;
+            $order->unavailable_item_ids = null;
+            $order->unavailable_item_vendor_note = null;
+
             $order->save();
 
             $difference = $total_order_amount - $old_order_amount;
 
-            if ($difference != 0 && in_array($order->payment_method, ['wallet']) || $order->payment_status === 'paid') {
-                if ($difference > 0) {
-                    CustomerLogic::create_wallet_transaction(
-                        $order->user_id,
-                        $difference,
-                        'order_place',
-                        'Order edited (amount increased) for order ID: ' . $order->id
-                    );
-                } else {
-                    CustomerLogic::create_wallet_transaction(
-                        $order->user_id,
-                        abs($difference),
-                        'order_refund',
-                        'Order edited (amount decreased) for order ID: ' . $order->id
-                    );
-                }
+            $settlement = $this->applyOrderEditWalletSettlement($order, $difference);
+            if (!$settlement['ok']) {
+                DB::rollBack();
+
+                return response()->json([
+                    'errors' => [
+                        ['code' => $settlement['code'], 'message' => $settlement['message']]
+                    ]
+                ], 403);
+            }
+
+            // Tell the vendor the customer has finished editing so preparation can
+            // resume. Only when a request was actually outstanding -- a routine
+            // customer edit should not page the vendor.
+            $vendorNotification = null;
+            if ($negotiationWasOpen) {
+                $vendorNotification = [
+                    'title' => translate('messages.order_updated_by_customer'),
+                    'description' => translate('messages.customer_has_updated_order') . ' #' . $order->id
+                        . '. ' . translate('messages.please_continue_preparing_the_order'),
+                    'order_id' => (string) $order->id,
+                    'image' => '',
+                    'type' => 'order_status',
+                ];
+
+                DB::table('user_notifications')->insert([
+                    'data' => json_encode($vendorNotification),
+                    'vendor_id' => $order->store?->vendor_id,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
             }
 
             DB::commit();
+
+            // Push is sent after commit: it cannot be rolled back, and a push
+            // failure must not discard a completed edit.
+            if ($vendorNotification) {
+                $this->sendVendorOrderEditedNotification($order, $vendorNotification);
+            }
 
             return response()->json([
                 'message' => 'Order updated successfully',
@@ -954,6 +999,163 @@ class OrderController extends Controller
                 'line' => $th->getLine(),
                 'trace' => config('app.debug') ? $th->getTraceAsString() : 'enable APP_DEBUG to see trace',
             ], 500);
+        }
+    }
+
+    /**
+     * Wallet settlement for an order edit.
+     *
+     * Assembled from existing MoonJoin production patterns rather than a new design:
+     *   - balance guard      : Admin\OrderController::update()      (abort + notify customer)
+     *   - return-value check : Vendor\WebVendorCartController       (create_wallet_transaction() === false)
+     *   - idempotency        : Vendor\EmployeeWalletController      (lockForUpdate + time-window dedupe)
+     *
+     * Must be called inside an open transaction so the lock is held and the
+     * caller can roll the order back when this returns ok = false.
+     *
+     * @return array{ok: bool, code: string, message: string}
+     */
+    private function applyOrderEditWalletSettlement(Order $order, float $difference): array
+    {
+        $ok = ['ok' => true, 'code' => 'order', 'message' => ''];
+
+        // A zero-difference edit moves no money. Previously a repeat submit on a
+        // paid order fell through to the else branch and wrote a 0.00 refund row.
+        if ($difference == 0.0) {
+            return $ok;
+        }
+
+        // Parentheses are deliberate. Without them && binds tighter than ||, so
+        // every paid order settled regardless of $difference.
+        if (!($order->payment_method == 'wallet' || $order->payment_status == 'paid')) {
+            return $ok;
+        }
+
+        // Lock the balance holder for the remainder of the transaction so two
+        // concurrent edits cannot both read the same wallet_balance.
+        $user = DB::table('users')->where('id', $order->user_id)->lockForUpdate()->first();
+        if (!$user) {
+            return ['ok' => false, 'code' => 'customer', 'message' => translate('messages.not_found')];
+        }
+
+        $isDebit   = $difference > 0;
+        $amount    = abs($difference);
+        $type      = $isDebit ? 'order_place' : 'order_refund';
+        $reference = $isDebit
+            ? 'Order edited (amount increased) for order ID: ' . $order->id
+            : 'Order edited (amount decreased) for order ID: ' . $order->id;
+
+        // Balance guard on debits only, matching Admin Order Edit.
+        if ($isDebit && $user->wallet_balance < $amount) {
+            $this->sendOrderEditWalletNotification($order, [
+                'title' => translate('messages.insufficient_wallet_balance'),
+                'description' => translate('messages.your_wallet_balance_is_insufficient_to_cover_the_additional_amount_of_')
+                    . Helpers::format_currency($amount)
+                    . translate('messages._please_fund_your_wallet_to_process_this_order_edit.'),
+                'order_id' => (string) $order->id,
+                'image' => '',
+                'type' => 'order_status',
+            ]);
+
+            return [
+                'ok' => false,
+                'code' => 'wallet',
+                'message' => translate('messages.customer_has_insufficient_wallet_balance'),
+            ];
+        }
+
+        // Idempotency: an identical settlement inside the window is a replay of
+        // the same request, not a second charge.
+        $duplicate = DB::table('wallet_transactions')
+            ->where('user_id', $order->user_id)
+            ->where('transaction_type', $type)
+            ->where('reference', $reference)
+            ->where($isDebit ? 'debit' : 'credit', $amount)
+            ->where('created_at', '>=', now()->subMinutes(2))
+            ->first();
+
+        if ($duplicate) {
+            \Log::warning('ORDER EDIT IDEMPOTENCY LOCK TRIGGERED - reusing settlement', [
+                'order_id' => $order->id,
+                'wallet_transaction_id' => $duplicate->id,
+            ]);
+
+            return $ok;
+        }
+
+        $status = CustomerLogic::create_wallet_transaction($order->user_id, $amount, $type, $reference);
+
+        // create_wallet_transaction() returns false when the wallet feature is
+        // switched off. Ignoring it would change the order amount without moving
+        // any money, which is how the other API paths silently lose settlements.
+        if (!$status) {
+            return [
+                'ok' => false,
+                'code' => 'wallet',
+                'message' => translate('messages.wallet_transaction_failed'),
+            ];
+        }
+
+        $formattedAmount = Helpers::format_currency($amount);
+        $this->sendOrderEditWalletNotification($order, [
+            'title' => $isDebit ? translate('messages.wallet_debited') : translate('messages.wallet_credited'),
+            'description' => $isDebit
+                ? $formattedAmount . ' ' . translate('messages.has_been_charged_from_your_wallet') . '. ' . translate('messages.reason') . ': ' . $reference
+                : $formattedAmount . ' ' . translate('messages.has_been_refunded_to_your_wallet') . '. ' . translate('messages.reason') . ': ' . $reference,
+            'order_id' => (string) $order->id,
+            'image' => '',
+            'type' => 'wallet_change',
+        ]);
+
+        return $ok;
+    }
+
+    /**
+     * Vendor push after a customer completes an edit.
+     *
+     * Mirrors the store-notification pattern in Helpers.php (~line 1822): gated on
+     * the store's push_notification_status, sent to the vendor's firebase_token,
+     * and forwarded to store employees. The user_notifications row is written by
+     * the caller inside the transaction; only the push happens here.
+     */
+    private function sendVendorOrderEditedNotification(Order $order, array $notification_data): void
+    {
+        try {
+            $push_notification_status = Helpers::getNotificationStatusData(
+                'store',
+                'store_order_notification',
+                'push_notification_status',
+                $order?->store?->id
+            );
+
+            if ($push_notification_status && $order->store && $order->store->vendor) {
+                Helpers::send_push_notif_to_device($order->store->vendor->firebase_token, $notification_data);
+                Helpers::sendStoreEmployeeNotification($order, $notification_data);
+            }
+        } catch (\Exception $e) {
+            info('Vendor order-edited notification failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Push + in-app notification, mirroring
+     * Vendor\OrderController::sendOrderWalletChangeNotification().
+     */
+    private function sendOrderEditWalletNotification(Order $order, array $notification_data): void
+    {
+        try {
+            DB::table('user_notifications')->insert([
+                'data' => json_encode($notification_data),
+                'user_id' => $order->user_id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            if ($order->customer && $order->customer->cm_firebase_token) {
+                Helpers::send_push_notif_to_device($order->customer->cm_firebase_token, $notification_data);
+            }
+        } catch (\Exception $e) {
+            info('Order edit wallet notification failed: ' . $e->getMessage());
         }
     }
 }
