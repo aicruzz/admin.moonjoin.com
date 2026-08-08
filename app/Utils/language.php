@@ -14,9 +14,16 @@ if (!function_exists('translate')) {
             $processed_key = ucfirst(str_replace('_', ' ', removeSpecialCharacters($key)));
             $key = removeSpecialCharacters($key);
             if (!array_key_exists($key, $lang_array)) {
-                $lang_array[$key] = $processed_key;
-                $str = "<?php return " . var_export($lang_array, true) . ";";
-                file_put_contents(base_path('resources/lang/' . $local . '/messages.php'), $str);
+                // RI.2: same persistence policy as the helpers.php implementation.
+                // This copy is dead today - app/helpers.php is autoloaded first
+                // (composer files index 7 vs 15) so function_exists() short-circuits
+                // this one - but an unguarded second writer is a latent regression
+                // if that load order ever changes.
+                if (config('translation.persist_missing_keys')) {
+                    $lang_array[$key] = $processed_key;
+                    persist_language_array(base_path('resources/lang/' . $local . '/messages.php'), $lang_array);
+                }
+
                 $result = $processed_key;
             } else {
                 $result = __('messages.' . $key);

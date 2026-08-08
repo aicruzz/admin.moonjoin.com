@@ -17,6 +17,44 @@ use App\Models\SubscriptionBillingAndRefundHistory;
 use Brian2694\Toastr\Facades\Toastr;
 use Modules\Rental\Entities\Trips;
 
+if (! function_exists('persist_language_array')) {
+    /**
+     * RI.2: write a locale array to disk without losing a concurrent write.
+     *
+     * The previous inline file_put_contents() rewrote the whole ~9,400-line file
+     * non-atomically. Two simultaneous misses could interleave, dropping one
+     * key or truncating the file - and a truncated messages.php breaks every
+     * page, because every view calls translate(). Writing to a temp file in the
+     * same directory and renaming makes the replacement atomic; the lock stops
+     * two writers racing on the temp file itself.
+     *
+     * Never throws: a failed discovery write must not break a page render.
+     */
+    function persist_language_array(string $path, array $lang_array): bool
+    {
+        $contents = "<?php return " . var_export($lang_array, true) . ";";
+        $temp = $path . '.' . getmypid() . '.tmp';
+
+        try {
+            if (file_put_contents($temp, $contents, LOCK_EX) === false) {
+                return false;
+            }
+
+            if (!rename($temp, $path)) {
+                @unlink($temp);
+                return false;
+            }
+
+            return true;
+        } catch (\Throwable $e) {
+            @unlink($temp);
+            info('persist_language_array failed: ' . $e->getMessage());
+
+            return false;
+        }
+    }
+}
+
 if (! function_exists('translate')) {
     function translate($key, $replace = [])
     {
@@ -31,9 +69,16 @@ if (! function_exists('translate')) {
             $processed_key = ucfirst(str_replace('_', ' ', Helpers::remove_invalid_charcaters($key)));
 
             if (!array_key_exists($key, $lang_array)) {
-                $lang_array[$key] = $processed_key;
-                $str = "<?php return " . var_export($lang_array, true) . ";";
-                file_put_contents(base_path('resources/lang/' . $local . '/messages.php'), $str);
+                // RI.2: the fallback below is returned either way, so what a user
+                // sees never depends on this flag. Persistence is opt-in because a
+                // running application must not rewrite a tracked source file:
+                // in production that dirtied the deployment working tree and let
+                // arbitrary runtime values become permanent translation entries.
+                if (config('translation.persist_missing_keys')) {
+                    $lang_array[$key] = $processed_key;
+                    persist_language_array(base_path('resources/lang/' . $local . '/messages.php'), $lang_array);
+                }
+
                 $result = $processed_key;
             } else {
                 $result = trans('messages.' . $key, $replace);
