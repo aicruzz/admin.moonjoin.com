@@ -851,7 +851,14 @@ class OrderController extends Controller
                 $variation_encoded = null;
                 if (!empty($c['variation'])) {
                     $variationInput = is_array($c['variation']) ? $c['variation'] : json_decode($c['variation'], true);
-                    $product_variations = json_decode($product->food_variations ?? 'null', true);
+                    // Helpers::product_data_formatting() above mutates the model in
+                    // place and returns the same object, so food_variations is already
+                    // decoded here - an array, or '' when the product has none.
+                    // Decoding a second time passed an array to json_decode() and threw
+                    // a TypeError under PHP 8. Decode only if it is still a string.
+                    $product_variations = is_array($product->food_variations)
+                        ? $product->food_variations
+                        : json_decode($product->food_variations ?? 'null', true);
                     if ($product_variations && count($product_variations)) {
                         $variation_data = Helpers::get_edit_varient($product_variations, $variationInput);
                         $variation_encoded = json_encode($variation_data['variations']);
