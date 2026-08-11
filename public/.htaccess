@@ -14,6 +14,13 @@
     RewriteCond %{REQUEST_URI} (.+)/$
     RewriteRule ^ %1 [L,R=301]
 
+    # Compatibility: the application generates asset URLs with a /public/ prefix
+    # from the previous project-root document-root architecture.
+    # The production document root is now public/, so normalise the legacy
+    # /public/assets/ URLs to the real /assets/ location.
+    # Scoped strictly to assets; storage and application routes are unaffected.
+    RewriteRule ^public/assets/(.*)$ /assets/$1 [L]
+
     # Send Requests To Front Controller...
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_FILENAME} !-f
