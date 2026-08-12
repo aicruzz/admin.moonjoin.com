@@ -561,9 +561,6 @@ trait PlaceNewOrder
             }
 
             DB::commit();
-             if ($request->user && in_array($order->payment_status, ['paid', 'partially_paid'])) {
-                app(\App\Services\NinePsbService::class)->debitCustomer($order, $request->user);
-            }
 
             $this->sentOrderPlaceNotification($request, $order, $store);
 
