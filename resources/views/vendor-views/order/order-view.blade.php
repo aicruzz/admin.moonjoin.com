@@ -92,12 +92,16 @@
                                 </div>
                                 @endif
                                 <!-- New Note End -->
-                                @if ($order['unavailable_item_note'])
+                                {{-- The vendor's shortage message for the current negotiation round.
+                                     Read from unavailable_item_vendor_note, the column
+                                     markUnavailableItems() writes. unavailable_item_note is the
+                                     customer's own checkout instruction and is never written here. --}}
+                                @if ($order['unavailable_item_vendor_note'])
                                     <h6 class="w-100 badge-soft-warning p-1 rounded mt-2">
                                         <span class="text-dark">
                                             {{ translate('messages.order_unavailable_item_note') }} :
                                         </span>
-                                        {{ $order['unavailable_item_note'] }}
+                                        {{ $order['unavailable_item_vendor_note'] }}
                                     </h6>
                                 @endif
                                 @if ($order['delivery_instruction'])
@@ -1648,7 +1652,7 @@
                                       name="unavailable_note"
                                       class="form-control"
                                       rows="3"
-                                      placeholder="{{ translate('messages.e.g._some_items_are_out_of_stock_please_edit_your_order') }}">{{ $order->unavailable_item_note ?? '' }}</textarea>
+                                      placeholder="{{ translate('messages.e.g._some_items_are_out_of_stock_please_edit_your_order') }}">{{ $order->unavailable_item_vendor_note ?? '' }}</textarea>
                         </div>
 
                     </div><!-- /.modal-body -->

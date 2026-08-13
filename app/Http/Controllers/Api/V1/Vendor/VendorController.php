@@ -569,7 +569,11 @@ class VendorController extends Controller
 
 
         $order->unavailable_item_ids = json_encode($request->unavailable_item_ids);
-        $order->unavailable_item_note = $request->unavailable_note ?? null;
+        // Same contract as Vendor\OrderController::markUnavailableItems(): the
+        // vendor's message belongs in its own column. unavailable_item_note is the
+        // customer's checkout instruction written at order placement and must not
+        // be overwritten by a vendor shortage message.
+        $order->unavailable_item_vendor_note = $request->unavailable_note ?? null;
 
         $order->customer_edit_requested = 1;
 
