@@ -871,6 +871,23 @@ class OrderController extends Controller
         } else if ($order->order_type != 'parcel' && in_array($request->order_status, ['picked_up'])) {
             Helpers::sendOrderDeliveryVerificationOtp($order);
         }
+        // Settlement gate, mirroring the rider path and the vendor path's own rule.
+        // Advancing past preparation while unclaimed strands the vendor: Claim Funds
+        // requires order_status === 'processing', and payout requires a claim.
+        //
+        // Deliberately NOT a blanket status lock. Backward movement stays open, and
+        // is the documented recovery route for an order already stranded:
+        //   handover -> processing -> [vendor claims] -> normal progression.
+        //
+        // emergency_status_override is the audited Admin-only escape hatch for the
+        // case where physical reality has outrun the financial workflow. It is
+        // handled by its own endpoint, never inferred from a normal status change.
+        if (in_array($request->order_status, ['handover', 'picked_up', 'delivered'], true)
+            && $order->claim_status !== 'claimed') {
+            Toastr::error(translate('messages.order_funds_must_be_claimed_before_progress'));
+            return back();
+        }
+
         $order->order_status = $request->order_status;
         if ($request->order_status == 'processing') {
             $order->processing_time = ($request?->processing_time) ? $request->processing_time : explode('-', $order['store']['delivery_time'])[0];
@@ -989,6 +1006,104 @@ class OrderController extends Controller
             return response()->json([], 200);
         }
         return response()->json(['message' => 'Deliveryman not available!'], 400);
+    }
+
+    /**
+     * Admin-only emergency operational status override.
+     *
+     * Physical reality can outrun the financial workflow: a vendor forgets to click
+     * Claim Funds, the rider collects the order anyway, and the record no longer
+     * matches what happened. order_status must stay truthful, so admin needs a way
+     * to record reality without pretending the money moved.
+     *
+     * This is deliberately a separate endpoint rather than a flag on status(). A
+     * normal status change must never be silently reinterpreted as an override.
+     *
+     * Financially inert by construction: it writes order_status and its timestamp
+     * and nothing else. claim_status and pay_status are read for the audit record
+     * and never assigned, so an overridden order stays unclaimed and the vendor's
+     * settlement stays owed. Recovery is unchanged - move the order back to
+     * 'processing', let the vendor claim, then progress normally.
+     */
+    public function emergency_status_override(Request $request)
+    {
+        $request->validate([
+            'id'           => 'required|integer',
+            'order_status' => 'required|in:handover,picked_up,delivered',
+            'reason'       => 'required|string|min:10|max:500',
+            'confirm'      => 'required|accepted',
+        ]);
+
+        $outcome = null;
+
+        DB::transaction(function () use ($request, &$outcome) {
+            $order = Order::withOutGlobalScope(ZoneScope::class)
+                ->where('id', $request->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$order) {
+                $outcome = ['level' => 'error', 'message' => translate('messages.order_not_found')];
+                return;
+            }
+
+            // Terminal and reversed states are owned by the cancel/refund branches
+            // and their B.5/B.6 claim guards. The override must not become a way
+            // around them.
+            if (in_array($order->order_status, ['canceled', 'refunded', 'failed', 'returned', 'refund_requested'], true)) {
+                $outcome = ['level' => 'error', 'message' => translate('messages.you_can_not_change_the_status_of_this_order')];
+                return;
+            }
+
+            // The override exists only for the unclaimed case. A claimed order can
+            // already progress through the normal path, so routing it through here
+            // would be an unaudited detour around the ordinary rules.
+            if ($order->claim_status === 'claimed') {
+                $outcome = ['level' => 'warning', 'message' => translate('messages.claimed_order_uses_normal_status_progression')];
+                return;
+            }
+
+            $before_status = $order->order_status;
+
+            if ($before_status === $request->order_status) {
+                $outcome = ['level' => 'warning', 'message' => translate('messages.order_is_already_in_this_status')];
+                return;
+            }
+
+            // Only these two columns are written. No claim, no payout, no wallet.
+            $order->order_status = $request->order_status;
+            $order[$request->order_status] = now();
+            $order->save();
+
+            AuditLog::record(
+                'admin_order_status_emergency_override',
+                'Order',
+                $order->id,
+                ['order_status' => $before_status],
+                ['order_status' => $order->order_status],
+                null,
+                [
+                    'reason'       => $request->reason,
+                    'claim_status' => $order->claim_status,
+                    'pay_status'   => $order->pay_status,
+                    'customer_id'  => $order->user_id,
+                    'store_id'     => $order->store_id,
+                    'settlement_still_owed' => $order->claim_status !== 'claimed',
+                ]
+            );
+
+            $outcome = ['level' => 'success', 'message' => translate('messages.order_status_overridden_settlement_still_owed')];
+        });
+
+        if ($outcome['level'] === 'error') {
+            Toastr::error($outcome['message']);
+        } elseif ($outcome['level'] === 'warning') {
+            Toastr::warning($outcome['message']);
+        } else {
+            Toastr::success($outcome['message']);
+        }
+
+        return back();
     }
 
     public function update_shipping(Request $request, Order $order)
@@ -1423,11 +1538,43 @@ class OrderController extends Controller
             }
         ])->where(['id' => $order->id])->StoreOrder()->first();
 
+        // Financial freeze. claim_status is MoonJoin's settlement boundary: once the
+        // vendor has claimed an order's funds, no actor may alter its products,
+        // quantities or amount - customer, vendor, employee or admin. The customer
+        // endpoint has enforced this since A.1; admin was the remaining bypass.
+        //
+        // Deliberately NOT restricted to pending/confirmed. An unclaimed order in
+        // 'processing' is the admin intervention window: the customer can no longer
+        // self-edit, so a vendor who finds an unavailable item mid-preparation asks
+        // admin to adjust the order. That capability is preserved.
+        if ($order && $order->claim_status === 'claimed') {
+            Toastr::error(translate('messages.claimed_order_edit_requires_escrow'));
+            return back();
+        }
+
         if (!$request->session()->has('order_cart')) {
             Toastr::error(translate('messages.order_data_not_found'));
             return back();
         }
         DB::beginTransaction();
+
+        // Re-check the freeze against a locked row, matching the pattern used by
+        // claim, payout and the customer edit path. The check above can race a
+        // concurrent Claim Funds; this one cannot, and the lock also serialises two
+        // admins editing the same order.
+        $locked_order = Order::where('id', $order->id)->lockForUpdate()->first();
+
+        if (!$locked_order) {
+            DB::rollBack();
+            Toastr::error(translate('messages.order_data_not_found'));
+            return back();
+        }
+
+        if ($locked_order->claim_status === 'claimed') {
+            DB::rollBack();
+            Toastr::error(translate('messages.claimed_order_edit_requires_escrow'));
+            return back();
+        }
         $cart = $request->session()->get('order_cart', collect([]));
         $store = $order->store;
         $coupon = null;
@@ -1689,16 +1836,46 @@ class OrderController extends Controller
 
         $difference = $order->order_amount - $old_order_amount;
         if ($difference != 0 && ($order->payment_method == 'wallet' || $order->payment_status == 'paid')) {
+            // create_wallet_transaction() returns false when the wallet feature is
+            // switched off. Discarding that return changed the order amount without
+            // moving any money - the same silent-settlement-loss the customer path
+            // was corrected for. A falsy result must abort the whole edit.
             if ($difference > 0) {
-                CustomerLogic::create_wallet_transaction($order->user_id, $difference, 'order_place', 'Order edited (amount increased) for order ID: ' . $order->id);
-            } else if ($difference < 0) {
-                CustomerLogic::create_wallet_transaction($order->user_id, abs($difference), 'order_refund', 'Order edited (amount decreased) for order ID: ' . $order->id);
+                $wallet_status = CustomerLogic::create_wallet_transaction($order->user_id, $difference, 'order_place', 'Order edited (amount increased) for order ID: ' . $order->id);
+            } else {
+                $wallet_status = CustomerLogic::create_wallet_transaction($order->user_id, abs($difference), 'order_refund', 'Order edited (amount decreased) for order ID: ' . $order->id);
+            }
+
+            if (!$wallet_status) {
+                DB::rollBack();
+                Toastr::error(translate('messages.wallet_transaction_failed'));
+                return back();
             }
 
             $type = $difference > 0 ? 'debit' : 'credit';
             $reason = $difference > 0 ? 'Order edited (amount increased) for order #' . $order->id : 'Order edited (amount decreased) for order #' . $order->id;
             $this->sendOrderWalletChangeNotification($order->user_id, $type, abs($difference), $reason, $order->id);
         }
+
+        // Audited inside the transaction: there is no external side effect here, so
+        // the record and the money commit together or not at all. A rollback above
+        // discards this row rather than falsely reporting a successful edit.
+        AuditLog::record(
+            'admin_order_edit',
+            'Order',
+            $order->id,
+            ['order_amount' => $old_order_amount],
+            ['order_amount' => $order->order_amount],
+            null,
+            [
+                'customer_id'    => $order->user_id,
+                'difference'     => $difference,
+                'claim_status'   => $order->claim_status,
+                'pay_status'     => $order->pay_status,
+                'order_status'   => $order->order_status,
+                'payment_method' => $order->payment_method,
+            ]
+        );
 
         if ($order->order_type !== 'parcel') {
             $taxMapCollection = collect($taxMap);

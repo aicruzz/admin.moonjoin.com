@@ -278,6 +278,11 @@ Route::group(['namespace' => 'Admin', 'as' => 'admin.'], function () {
         // customer wallet, so it must not be reachable by GET (CSRF-exempt).
         // module:order was missing here while every sibling order route has it.
         Route::post('order/status', 'OrderController@status')->name('order.status')->middleware('module:order');
+        // Audited Admin-only escape hatch for when physical delivery has outrun the
+        // financial workflow. Separate endpoint by design: a normal status change
+        // must never be reinterpreted as an emergency override.
+        Route::post('order/emergency-status-override', 'OrderController@emergency_status_override')
+            ->name('order.emergency-status-override')->middleware('module:order');
         Route::get('order/offline-payment', 'OrderController@offline_payment')->name('order.offline_payment');
         Route::group(['prefix' => 'order', 'as' => 'order.', 'middleware' => ['module:order']], function () {
             Route::get('list/{status}', 'OrderController@list')->name('list');

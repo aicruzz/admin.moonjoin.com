@@ -1307,6 +1307,28 @@
                                                 </div>
                                             </div>
                                         @endif
+                                        {{-- Emergency operational status override.
+                                             Deliberately outside the status dropdown and styled as a danger
+                                             action so it cannot be mistaken for a normal transition. Shown
+                                             only when the backend would actually accept it: unclaimed, and
+                                             not in a terminal or reversed state. These conditions mirror
+                                             OrderController@emergency_status_override - they are a UI
+                                             courtesy, not enforcement; the backend re-checks all of them
+                                             under a row lock. --}}
+                                        @if ($order->claim_status !== 'claimed'
+                                            && !in_array($order->order_status, ['canceled', 'refunded', 'failed', 'returned', 'refund_requested', 'delivered'])
+                                            && $order->order_type != 'parcel')
+                                            <div class="w-100 text-center mt-3 pt-3 border-top">
+                                                <button type="button" class="btn btn-outline-danger btn--sm w-100"
+                                                        data-toggle="modal" data-target="#emergencyStatusOverrideModal">
+                                                    <i class="tio-warning"></i>
+                                                    {{ translate('messages.Emergency status override') }}
+                                                </button>
+                                                <small class="d-block text-muted mt-1">
+                                                    {{ translate('messages.Use only when the order has physically progressed but funds were never claimed') }}
+                                                </small>
+                                            </div>
+                                        @endif
                                         @if (!in_array($order->order_status, [ 'refunded','delivered', 'canceled']) &&  ( !$order->delivery_man && $order['order_type'] != 'take_away' && (($order->store && !$order?->store?->sub_self_delivery))))
                                             <div class="w-100 text-center mt-3">
                                                 <button type="button" class="btn btn--primary w-100" data-toggle="modal"
@@ -2194,9 +2216,106 @@
                 </div>
             </div>
         </div>
+
+{{-- Emergency operational status override.
+     Records physical reality when a vendor never claimed funds. Financially inert
+     by construction: the endpoint writes order_status and its timestamp only. --}}
+<div class="modal fade" id="emergencyStatusOverrideModal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-600" role="document">
+        <div class="modal-content">
+            <form action="{{ route('admin.order.emergency-status-override') }}" method="post">
+                @csrf
+                <input type="hidden" name="id" value="{{ $order['id'] }}">
+
+                <div class="modal-header px-3 pt-3">
+                    <h5 class="modal-title text-danger">
+                        <i class="tio-warning"></i>
+                        {{ translate('messages.Emergency status override') }}
+                    </h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+
+                <div class="modal-body px-3">
+                    @if ($errors->any())
+                        <div class="alert alert-danger">
+                            <ul class="mb-0 pl-3">
+                                @foreach ($errors->all() as $error)
+                                    <li>{{ $error }}</li>
+                                @endforeach
+                            </ul>
+                        </div>
+                    @endif
+
+                    <div class="alert alert-warning">
+                        <strong>{{ translate('messages.This is an exception, not a normal status change.') }}</strong>
+                        <ul class="mb-0 mt-2 pl-3 fs-12">
+                            <li>{{ translate('messages.It does NOT claim funds and does NOT pay out.') }}</li>
+                            <li>{{ translate('messages.claim_status and pay_status are left unchanged.') }}</li>
+                            <li>{{ translate('messages.No wallet balance and no order amount is altered.') }}</li>
+                            <li>{{ translate('messages.Cancellation, refund and COD protections still apply.') }}</li>
+                            <li>{{ translate('messages.The vendor settlement for this order remains owed.') }}</li>
+                        </ul>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="input-label" for="eso_status">
+                            {{ translate('messages.New operational status') }}
+                            <span class="text-danger">*</span>
+                        </label>
+                        <select name="order_status" id="eso_status" class="form-control" required>
+                            <option value="">{{ translate('messages.Select status') }}</option>
+                            <option value="handover">{{ translate('messages.handover') }}</option>
+                            <option value="picked_up">{{ translate('messages.picked_up') }}</option>
+                            <option value="delivered">{{ translate('messages.delivered') }}</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="input-label" for="eso_reason">
+                            {{ translate('messages.Reason for this override') }}
+                            <span class="text-danger">*</span>
+                        </label>
+                        <textarea name="reason" id="eso_reason" class="form-control" rows="3"
+                                  minlength="10" maxlength="500" required
+                                  placeholder="{{ translate('messages.Example: Vendor forgot to claim funds before the rider collected the order.') }}"></textarea>
+                        <small class="text-muted">{{ translate('messages.Minimum 10 characters. Recorded in the audit log.') }}</small>
+                    </div>
+
+                    <div class="form-group form-check">
+                        <input type="checkbox" name="confirm" value="1" id="eso_confirm"
+                               class="form-check-input" required>
+                        <label class="form-check-label" for="eso_confirm">
+                            {{ translate('messages.I confirm this is an emergency override and the settlement remains owed.') }}
+                        </label>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn--reset" data-dismiss="modal">
+                        {{ translate('messages.cancel') }}
+                    </button>
+                    <button type="submit" class="btn btn-danger">
+                        {{ translate('messages.Override status') }}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 @endsection
 
 @push('script_2')
+<script>
+    // A validation failure redirects back with an error bag, which looks identical
+    // to success from the status code alone. Reopen the modal so the admin sees the
+    // reason their override was rejected.
+    @if ($errors->any())
+        $(function () { $('#emergencyStatusOverrideModal').modal('show'); });
+    @endif
+</script>
     <script>
         $(document).on("click", ".addon-quantity-input-toggle", function (event) {
             let cb = $(event.target);

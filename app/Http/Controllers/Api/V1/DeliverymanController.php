@@ -496,6 +496,30 @@ class DeliverymanController extends Controller
             ], 403);
         }
 
+        // Settlement gate. An order may not progress past preparation until the
+        // vendor has claimed its funds. Claim Funds requires order_status ===
+        // 'processing', so advancing beyond it while unclaimed permanently strands
+        // the vendor's settlement: claim becomes impossible, and payout requires a
+        // claim. The vendor's own status path has always enforced this; the rider
+        // path did not, which made a rider able to strand a vendor's money.
+        //
+        // No lock is needed. claim_status is monotonic - it only ever moves
+        // unclaimed -> claimed - so reading 'claimed' can never later become false,
+        // and reading 'unclaimed' can only cause a rejection the rider retries.
+        // Neither direction can produce an invalid financial state.
+        //
+        // Deliberately keyed on the target status, not the current one, so an order
+        // left unclaimed by an admin emergency override cannot be walked forward
+        // here either.
+        if (in_array($request['status'], ['handover', 'picked_up', 'delivered'], true)
+            && $order->claim_status !== 'claimed') {
+            return response()->json([
+                'errors' => [
+                    ['code' => 'status', 'message' => translate('messages.order_funds_must_be_claimed_before_progress')],
+                ],
+            ], 403);
+        }
+
         if ($order->order_type == 'parcel' && $request['status'] == 'canceled') {
             $cancel_parcel_order = OrderLogic::cancelParcelOrder($order, 'deliveryman', $request);
             if (data_get($cancel_parcel_order, 'status_code') != 200) {

@@ -76,4 +76,7 @@ The Laravel framework is open-sourced software licensed under the [MIT license](
 ##  How to push 
 git add .
 git commit -m "test: verify production deployment pipeline"
-git push origin main         
+git push origin main
+
+## For Server Directory`1
+cd /home/moonxmmg/admin.moonjoin.com
