@@ -251,6 +251,7 @@ class NinePsbPaymentController extends Controller
                 'balance' => $newBalance,
                 'transaction_type' => 'add_fund',
                 'reference' => $reference,
+                'created_at' => now(),
             ]);
         });
 
