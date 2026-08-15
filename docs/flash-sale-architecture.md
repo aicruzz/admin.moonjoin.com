@@ -15,7 +15,7 @@
 | **Food** | ✅ **Supported (this change)** | **Allocation cap** — no comparison against `items.stock` |
 | Pharmacy | ❌ Not enabled — intentional | Inventory protection unchanged (`stock => true`) |
 | Parcel | ❌ Not enabled | n/a |
-| Rental | ❌ Not enabled — intentional, see §5 | n/a |
+| **Rental** (Car Rental, Short Apt Rental) | ✅ **Separate rental-owned campaign layer**, see §5 | **Promotional redemption cap** — never physical availability |
 
 ## 2. Food now uses the existing Flash Sale engine
 
@@ -68,8 +68,8 @@ Consequences:
 This is **not** an unlimited-stock Flash Sale.
 
 Note: `parcel` and `rental` also carry `stock => false`, so they would take the same
-branch — but neither can reach this code. Neither exposes a Flash Sale menu, and
-Rental does not use the `Item` model at all (§5).
+branch — but neither can reach this code. Neither exposes a Flash Sale menu here, and
+Rental does not use the `Item` model at all; it has its own campaign layer (§5).
 
 ## 4. Files changed
 
@@ -89,34 +89,77 @@ Flutter codebase.
 - **`moduleId` and zone scoping remain the source of truth** for what a client receives.
   Publish behaviour (one published sale per module) is unchanged.
 
-## 5. Rental — deliberately excluded
+## 5. Rental Flash Sale — implemented separately (supersedes the earlier exclusion)
 
-Rental **must not** be extended into `flash_sales` / `flash_sale_items` / `items.stock`.
+An earlier revision of this section said Rental must not receive a Flash Sale at all.
+That is now superseded: Rental has its own campaign layer under `Modules/Rental/`. The
+part that still stands is that Rental must **never** be forced into `flash_sale_items` --
+the shared engine resolves everything through `App\Models\Item`, and a rental listing is
+a `Vehicle` priced on three axes. No fake `Item` rows, no polymorphic `FlashSaleItem`, no
+change to the shared engine.
 
-Reasons, verified in code:
+### Rental domain (verified in source)
 
-- `Modules/Rental/Entities/` contains `Vehicle`, `VehicleBrand`, `VehicleCategory`,
-  `Trips`, `TripDetails`, `RentalCart`, … — **there is no `Item` model**.
-- `flash_sale_items.item_id` is a foreign key to `items`. Vehicles are not items.
-- No Flash Sale reference exists anywhere under `Modules/Rental/`.
-- Semantically, Flash Sale means *discounted units drawn from finite stock*, while
-  rental means *time-windowed availability of a specific asset*. "50 units of this car"
-  has no meaning.
+| Concept | Reality |
+|---|---|
+| Listing | `vehicles` (`Modules\Rental\Entities\Vehicle`) |
+| **Physical units** | **`vehicle_identities`** |
+| **Availability** | **`withCount('vehicleIdentities as total_vehicle_count')` filtered by the requested `schedule_at`**, rejected at `TripController:408-417` |
+| Pricing axes | `hourly_price × estimated_hours` · `day_wise_price × ceil(hours/24)` · `distance_price × distance` (`TripController:427-434`) |
+| Existing discount | `vehicles.discount_type` / `discount_price`, provider-controlled |
+| Booking | `trips` + `trip_details`; transaction `TripController:106 → ~248` |
+| Quantity | `trip_details.quantity`, genuinely > 1 and multiplies price |
+| Module isolation | `trips.module_id`, from the provider's module |
 
-**Do not** create fake `Item` records, polymorphic `FlashSaleItem` keys, or alter the
-Flash Sale tables to accommodate Rental.
+An earlier audit claimed Rental had *no* availability model. That was wrong -- it missed
+`vehicle_identities`. `multiple_vehicles` is a dead UI flag, but it is not the availability
+mechanism.
 
-**Future direction:** Rental should receive a **separate, rental-specific discount
-mechanism** built on rental/vehicle availability and date ranges — reusing the
-*pattern* (start/end date, publish flag, module/zone/store scoping) but not the
-`flash_sale_items` table. Not implemented; no Rental tables, APIs, or Admin screens
-were created.
+### Design
 
-**Future UI note (Flutter, not this codebase):** when Rental discounts are eventually
-built, the User App may reuse the approved MoonJoin Flash Sale card visual for
-consistency, with rental-specific content (e.g. "Special Rental Offer", "₦X / day",
-available dates) instead of "Sold 0/100" / "packs". The **backend business model must
-remain rental-specific** regardless of visual reuse.
+Two rental-owned tables, `rental_flash_sales` (campaign) and
+`rental_flash_sale_vehicles` (participating vehicle).
+
+- **Promotional allocation, not availability.** `redemption_cap` / `redeemed` cap
+  promotional redemptions. Physical availability remains `vehicle_identities` and is
+  untouched. **A booking must pass both gates**, and the two failures are reported
+  distinctly -- flash exhaustion never reads as vehicle unavailability.
+- **Quantity-based redemption.** A booking of 3 units consumes 3 redemptions.
+  All-or-nothing: 3 remaining refuses a quantity of 4 and consumes nothing.
+- **Atomic.** `RentalFlashSaleVehicle::reserve()` issues one conditional UPDATE
+  (`redemption_cap IS NULL OR redeemed + qty <= redemption_cap`). The database evaluates
+  the cap under the row lock, so competing bookings serialise. Zero rows → the trip
+  transaction rolls back with code `rental_flash_sale`.
+- **Booking-time eligibility.** The campaign must be running when the booking is placed;
+  the rental dates themselves may fall outside the window.
+- **Pricing axis.** `applies_to` (`all`/`hourly`/`distance_wise`/`day_wise`) selects which
+  axis is discounted, matching the `rental_type` vocabulary.
+- **One winning discount.** A running campaign replaces the provider's vehicle discount,
+  and the provider/admin store-discount override is skipped when any line is on a
+  campaign -- mirroring the shared engine, which skips the store discount for
+  `flash_sale` lines. Coupons are unchanged.
+- **Attribution.** `discount_on_trip_by` is written as `admin` for a campaign line
+  (admin-controlled), `vendor` otherwise. No new `trip_details` column was needed.
+- **Module isolation.** Enforced in `resolveFor()` via the campaign's `module_id`, so a
+  Car Rental campaign can never price a Short Apt Rental booking or vice versa.
+- **Estimates consume nothing.** Reservation runs only when `$increment === true`, the
+  flow's existing signal for a real booking rather than a price estimate.
+
+### Cancellation — redemptions are never restored
+
+Investigated rather than inherited. All four rental cancel paths decrement the
+**statistics** counter `total_trip` by `$detail->quantity`
+(`Api/User/TripController:677`, `Web/Admin/TripController:186`,
+`Web/Provider/TripController:167`, `Api/Provider/ProviderTripController:100`). There is no
+precedent for restoring a *promotional* allocation. Per the approved product decision,
+a cancelled booking does **not** return its redemption, which prevents cancel/rebook
+abuse of a limited campaign. A rolled-back booking is different: it never redeemed.
+
+### Car Rental vs Short Apt Rental
+
+Identical in code -- same `vehicles`, `trips`, pricing and statuses. There is no apartment
+entity anywhere in `Modules/Rental/`; a "Short Apt Rental" listing is a `Vehicle` row. One
+implementation serves both, separated only by `module_id`.
 
 ## 6. Validation performed
 

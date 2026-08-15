@@ -31,6 +31,7 @@ use MatanYadaev\EloquentSpatial\Objects\Point;
 use Modules\Rental\Emails\TripBooking;
 use Modules\Rental\Entities\RentalCartUserData;
 use Modules\Rental\Entities\VehicleReview;
+use Modules\Rental\Entities\RentalFlashSaleVehicle;
 use Modules\Rental\Traits\RentalPushNotification;
 
 class TripController extends Controller
@@ -123,7 +124,10 @@ class TripController extends Controller
 
         $details_data =  $this->tripDetails(request: $request, user_data: $user_data, carts: $carts, schedule_at: $schedule_at, estimated_trip_end_time: $estimated_trip_end_time, provider: $provider);
 
-        if (data_get($details_data, 'code') === 'details_data') {
+        // 'rental_flash_sale' is the promotional-allocation rejection; it rolls the
+        // booking back exactly like any other pricing failure, but carries its own
+        // code so a client never reports it as vehicle unavailability.
+        if (in_array(data_get($details_data, 'code'), ['details_data', 'rental_flash_sale'], true)) {
             DB::rollBack();
             return response()->json([
                 'errors' => [
@@ -379,6 +383,9 @@ class TripController extends Controller
         $quantity = 0;
         $details_data = [];
         $discount_on_trip_by = 'vendor';
+        // Flash sale lines collected during pricing and reserved once, atomically,
+        // after the whole cart has priced successfully.
+        $flash_sale_reservations = [];
         foreach ($carts as $cart) {
 
             $vehicle = $this->vehicle->where('id', $cart->vehicle_id)->active()
@@ -433,13 +440,39 @@ class TripController extends Controller
                 $getPrice = $cart->vehicle->distance_price *  $user_data->distance;
             }
 
-            $discount_data = $this->getDiscount(price: $getPrice, discount_type: $cart->vehicle->discount_type, discount: $cart->vehicle->discount_price);
+            // Rental flash sale takes precedence over the provider's own vehicle
+            // discount -- one winning discount, never stacked. Eligibility is decided
+            // once here and reused for the reservation below, so the price shown and
+            // the price charged cannot disagree. Module scoping comes from the
+            // provider's module, which is also what the trip is stamped with.
+            $flash_sale_vehicle = RentalFlashSaleVehicle::resolveFor(
+                $cart->vehicle_id,
+                $provider->module_id ?? null,
+                $user_data->rental_type
+            );
+
+            if ($flash_sale_vehicle) {
+                $discount_data = [
+                    'price' => $getPrice,
+                    'discount' => $flash_sale_vehicle->discountFor((float) $getPrice),
+                ];
+                $flash_sale_reservations[] = [
+                    'model' => $flash_sale_vehicle,
+                    'quantity' => (int) $cart->quantity,
+                ];
+            } else {
+                $discount_data = $this->getDiscount(price: $getPrice, discount_type: $cart->vehicle->discount_type, discount: $cart->vehicle->discount_price);
+            }
 
             $trip_details_data = [
                 'vehicle_id' => $cart->vehicle_id,
                 'quantity' => $cart->quantity,
-                'discount_on_trip_by' => 'vendor',
-                'discount_percentage' => $cart->vehicle->discount_type == 'amount' ? 0 : $cart->vehicle->discount_price,
+                // Admin-controlled campaign, so the promotional discount is attributed
+                // to admin rather than the vendor.
+                'discount_on_trip_by' => $flash_sale_vehicle ? 'admin' : 'vendor',
+                'discount_percentage' => $flash_sale_vehicle
+                    ? ($flash_sale_vehicle->discount_type == 'amount' ? 0 : $flash_sale_vehicle->discount)
+                    : ($cart->vehicle->discount_type == 'amount' ? 0 : $cart->vehicle->discount_price),
 
                 'category_id' => $cart->vehicle->category_id,
                 'price' => round($discount_data['price'], config('round_up_to_digit')) *  $cart->quantity,
@@ -447,7 +480,7 @@ class TripController extends Controller
                 'calculated_price' => round($discount_data['price'], config('round_up_to_digit')) *  $cart->quantity,
 
                 'discount_on_trip' => round($discount_data['discount'], config('round_up_to_digit')),
-                'discount_type' => $cart->vehicle->discount_type,
+                'discount_type' => $flash_sale_vehicle ? $flash_sale_vehicle->discount_type : $cart->vehicle->discount_type,
 
                 'tax_percentage' => 0,
                 'tax_amount' => 0,
@@ -474,7 +507,10 @@ class TripController extends Controller
 
         $discount = $discount_on_trip;
         $provider_discount = $this->helpers->get_store_discount($provider);
-        if (isset($provider_discount)) {
+        // Flash sale wins outright. When any line is on a campaign the provider/admin
+        // store discount must not overwrite it, mirroring the shared engine, which
+        // skips the store discount when the line's discount_type is flash_sale.
+        if (isset($provider_discount) && count($flash_sale_reservations) === 0) {
             $admin_discount = $this->checkAdminDiscount(price: $price, discount: $provider_discount['discount'], max_discount: $provider_discount['max_discount'], min_purchase: $provider_discount['min_purchase']);
 
             $discount = max($discount_on_trip, $admin_discount);
@@ -486,6 +522,24 @@ class TripController extends Controller
                     $details_data[$key]['discount_type'] = 'precentage';
                     $details_data[$key]['discount_percentage'] = $provider_discount['discount'];
                     $details_data[$key]['discount_on_trip'] =  $this->checkAdminDiscount(price: $price, discount: $provider_discount['discount'], max_discount: $provider_discount['max_discount'], min_purchase: $provider_discount['min_purchase'], vehicle_wise_price: $trip_data['price']);
+                }
+            }
+        }
+
+        // Promotional allocation is consumed only for a real booking. $increment is
+        // already the flow's signal for that: false means a price estimate, which must
+        // consume nothing. This runs inside the caller's trip transaction, so a later
+        // rollback releases the reservation; a cancellation deliberately does not.
+        if ($increment === true) {
+            foreach ($flash_sale_reservations as $reservation) {
+                if (!$reservation['model']->reserve($reservation['quantity'])) {
+                    // Distinct from vehicle unavailability: physical identities were
+                    // available, the promotion is what ran out. All-or-nothing.
+                    return [
+                        'code' => 'rental_flash_sale',
+                        'message' => translate('messages.rental_flash_sale_allocation_unavailable'),
+                        'status_code' => 403,
+                    ];
                 }
             }
         }
