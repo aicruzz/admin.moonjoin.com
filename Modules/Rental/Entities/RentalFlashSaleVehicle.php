@@ -93,6 +93,27 @@ class RentalFlashSaleVehicle extends Model
             ->first();
     }
 
+    /**
+     * Is this vehicle already in another campaign in the same module whose window
+     * overlaps the given one?
+     *
+     * Two overlapping campaigns for one vehicle would leave the pricing engine
+     * choosing a winner, so attachment is refused instead. Lives here rather than in
+     * the admin controller so the rule is testable and has one definition.
+     */
+    public static function hasOverlappingCampaign($vehicle_id, RentalFlashSale $flash_sale): bool
+    {
+        return self::query()
+            ->where('vehicle_id', $vehicle_id)
+            ->whereHas('flashSale', function ($query) use ($flash_sale) {
+                $query->where('id', '!=', $flash_sale->id)
+                    ->where('module_id', $flash_sale->module_id)
+                    ->where('start_date', '<=', $flash_sale->end_date)
+                    ->where('end_date', '>=', $flash_sale->start_date);
+            })
+            ->exists();
+    }
+
     /** Remaining promotional allocation; null when the campaign is uncapped. */
     public function remainingRedemptions(): ?int
     {

@@ -155,6 +155,49 @@ precedent for restoring a *promotional* allocation. Per the approved product dec
 a cancelled booking does **not** return its redemption, which prevents cancel/rebook
 abuse of a limited campaign. A rolled-back booking is different: it never redeemed.
 
+### Admin management
+
+`Web\Admin\Promotions\RentalFlashSaleController`, routed under
+`admin/rental/flash-sale` with the existing `module:promotion` middleware. Rental-owned;
+the shared `admin.flash-sale` routes are untouched.
+
+Create/edit/publish/status/delete a campaign, attach vehicles with discount type, value,
+`applies_to`, redemption cap and status, and detach or disable them. Campaigns are listed
+and resolved through `Config::get('module.current_module_id')`, so an admin only ever sees
+and edits campaigns for the rental module they are working in.
+
+Enforced server-side, not trusted from the request:
+
+- the campaign's module must be `module_type = 'rental'`;
+- a vehicle's module comes from **its provider's store**, so a Car Rental vehicle cannot
+  be attached to a Short Apt Rental campaign by submitting a different id;
+- percent discounts stay below 100 and amount discounts never exceed the applicable
+  axis price (`all` is checked against the cheapest non-zero axis);
+- duplicate attachment is refused, backed by the unique index;
+- `RentalFlashSaleVehicle::hasOverlappingCampaign()` refuses a vehicle already in another
+  campaign in the same module whose window overlaps, so the pricing engine never has to
+  choose a winner.
+
+### API payload
+
+Additive only. `Vehicle` appends a `flash_sale` attribute, so every existing customer
+vehicle response (listing, detail, search, top-rated) carries it without a new endpoint
+and without renaming or removing any field. It is `null` when no campaign is running or
+the allocation is exhausted.
+
+It resolves through the same `RentalFlashSaleVehicle::resolveFor()` the booking engine
+uses, with the module taken from the provider's store, so **the price displayed and the
+price charged cannot come from different campaigns or different modules**.
+
+Exposed: `title`, `discount_type`, `discount`, `applies_to`, `start_date`, `end_date`, and
+per-axis `original_price` / `flash_price` / `discount_amount` for the axes the campaign
+covers. `redeemed` and `redemption_cap` are deliberately **not** exposed -- no product
+requirement needs them and they are mutable internals.
+
+Known cost: the accessor resolves per vehicle, so a large listing performs one campaign
+lookup per row. Acceptable for correctness; revisit with eager loading if listing latency
+becomes a concern.
+
 ### Car Rental vs Short Apt Rental
 
 Identical in code -- same `vehicles`, `trips`, pricing and statuses. There is no apartment

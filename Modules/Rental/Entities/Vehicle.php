@@ -15,13 +15,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Modules\Rental\Entities\RentalFlashSaleVehicle;
 
 class Vehicle extends Model
 {
     use HasFactory , ReportFilter;
 
     protected $guarded = ['id'];
-    protected $appends = ['thumbnail_full_url', 'images_full_url', 'documents_full_url'];
+    protected $appends = ['thumbnail_full_url', 'images_full_url', 'documents_full_url', 'flash_sale'];
     protected $casts = [
         'air_condition' => 'integer',
         'multiple_vehicles' => 'integer',
@@ -88,6 +89,73 @@ class Vehicle extends Model
     public function provider(): BelongsTo
     {
         return $this->belongsTo(Store::class, 'provider_id', 'id');
+    }
+
+    public function flashSaleVehicles(): HasMany
+    {
+        return $this->hasMany(RentalFlashSaleVehicle::class, 'vehicle_id');
+    }
+
+    /**
+     * Rental flash sale presentation for this vehicle, or null when no campaign is
+     * running for it.
+     *
+     * Additive: it appends a field and changes no existing one. It resolves through
+     * RentalFlashSaleVehicle::resolveFor() -- the same lookup TripController uses when
+     * pricing a booking -- so the price displayed and the price charged cannot come
+     * from different campaigns. The module comes from the provider's store, which is
+     * also what the trip is stamped with, so a Car Rental campaign can never surface on
+     * a Short Apt Rental listing.
+     *
+     * Prices are given per axis, computed with the campaign's own discountFor(), and
+     * only for the axes the campaign applies to. redeemed/redemption_cap are not
+     * exposed: no product requirement needs them, and they are mutable internals.
+     */
+    public function getFlashSaleAttribute(): ?array
+    {
+        $module_id = $this->provider?->module_id;
+
+        if (!$module_id) {
+            return null;
+        }
+
+        $campaign_vehicle = RentalFlashSaleVehicle::resolveFor($this->id, $module_id);
+
+        if (!$campaign_vehicle || $campaign_vehicle->isExhausted()) {
+            return null;
+        }
+
+        $campaign = $campaign_vehicle->flashSale;
+        $axes = $campaign_vehicle->applies_to === 'all'
+            ? ['hourly', 'distance_wise', 'day_wise']
+            : [$campaign_vehicle->applies_to];
+
+        $base = [
+            'hourly' => (float) $this->hourly_price,
+            'distance_wise' => (float) $this->distance_price,
+            'day_wise' => (float) ($this->day_wise_price ?? 0),
+        ];
+
+        $prices = [];
+        foreach ($axes as $axis) {
+            $original = $base[$axis] ?? 0;
+            $discount = $campaign_vehicle->discountFor($original);
+            $prices[$axis] = [
+                'original_price' => round($original, 2),
+                'flash_price' => round(max(0, $original - $discount), 2),
+                'discount_amount' => round($discount, 2),
+            ];
+        }
+
+        return [
+            'title' => $campaign?->title,
+            'discount_type' => $campaign_vehicle->discount_type,
+            'discount' => (float) $campaign_vehicle->discount,
+            'applies_to' => $campaign_vehicle->applies_to,
+            'start_date' => $campaign?->start_date?->toDateTimeString(),
+            'end_date' => $campaign?->end_date?->toDateTimeString(),
+            'prices' => $prices,
+        ];
     }
 
     /**

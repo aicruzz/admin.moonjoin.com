@@ -286,6 +286,62 @@ class RentalFlashSaleTest extends TestCase
         $this->assertFalse($row->reserve(1), 'an exhausted campaign refuses further redemptions');
     }
 
+    // ------------------------------------------------------- overlapping campaigns
+
+    public function test_an_overlapping_campaign_for_the_same_vehicle_is_detected(): void
+    {
+        $existing = $this->campaign(['start_date' => now()->subDay(), 'end_date' => now()->addDays(5)]);
+        $this->attach($existing, ['vehicle_id' => 77]);
+
+        $proposed = $this->campaign(['start_date' => now()->addDays(2), 'end_date' => now()->addDays(9)]);
+
+        $this->assertTrue(
+            RentalFlashSaleVehicle::hasOverlappingCampaign(77, $proposed),
+            'the pricing engine must never have to choose between two campaigns'
+        );
+    }
+
+    public function test_a_non_overlapping_campaign_is_allowed(): void
+    {
+        $existing = $this->campaign(['start_date' => now()->subDays(10), 'end_date' => now()->subDays(5)]);
+        $this->attach($existing, ['vehicle_id' => 77]);
+
+        $proposed = $this->campaign(['start_date' => now()->addDay(), 'end_date' => now()->addDays(3)]);
+
+        $this->assertFalse(RentalFlashSaleVehicle::hasOverlappingCampaign(77, $proposed));
+    }
+
+    public function test_overlap_is_scoped_to_the_module(): void
+    {
+        $car = $this->campaign(['module_id' => self::CAR_RENTAL, 'start_date' => now(), 'end_date' => now()->addDays(5)]);
+        $this->attach($car, ['vehicle_id' => 77]);
+
+        $apt = $this->campaign(['module_id' => self::SHORT_APT_RENTAL, 'start_date' => now(), 'end_date' => now()->addDays(5)]);
+
+        $this->assertFalse(
+            RentalFlashSaleVehicle::hasOverlappingCampaign(77, $apt),
+            'campaigns in different modules never compete'
+        );
+    }
+
+    public function test_a_campaign_does_not_overlap_itself(): void
+    {
+        $campaign = $this->campaign();
+        $this->attach($campaign, ['vehicle_id' => 77]);
+
+        $this->assertFalse(RentalFlashSaleVehicle::hasOverlappingCampaign(77, $campaign));
+    }
+
+    public function test_a_different_vehicle_is_unaffected_by_an_overlap(): void
+    {
+        $existing = $this->campaign(['start_date' => now(), 'end_date' => now()->addDays(5)]);
+        $this->attach($existing, ['vehicle_id' => 77]);
+
+        $proposed = $this->campaign(['start_date' => now(), 'end_date' => now()->addDays(5)]);
+
+        $this->assertFalse(RentalFlashSaleVehicle::hasOverlappingCampaign(99, $proposed));
+    }
+
     protected function tearDown(): void
     {
         Schema::dropIfExists('rental_flash_sale_vehicles');

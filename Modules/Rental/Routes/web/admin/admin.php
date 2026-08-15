@@ -7,6 +7,7 @@ use Modules\Rental\Http\Controllers\Web\Admin\Promotions\BannerController;
 use Modules\Rental\Http\Controllers\Web\Admin\Promotions\CouponController;
 use Modules\Rental\Http\Controllers\Web\Admin\Promotions\CashBackController;
 use Modules\Rental\Http\Controllers\Web\Admin\Promotions\NotificationController;
+use Modules\Rental\Http\Controllers\Web\Admin\Promotions\RentalFlashSaleController;
 use Modules\Rental\Http\Controllers\Web\Admin\CategoryController;
 use Modules\Rental\Http\Controllers\Web\Admin\DriverController;
 use Modules\Rental\Http\Controllers\Web\Admin\ProviderController;
@@ -149,6 +150,22 @@ Route::group(['middleware' => ['admin', 'current-module']], function () {
             Route::delete('delete/{coupon}', [CouponController::class,'destroy'])->name('delete');
             Route::get('status/{coupon}', [CouponController::class,'status'])->name('status');
             Route::get('export', [CouponController::class, 'export'])->name('export');
+        });
+
+        // Rental flash sale campaigns. Rental-owned; the shared admin.flash-sale
+        // routes drive flash_sale_items and are untouched.
+        Route::group(['prefix' => 'flash-sale', 'as' => 'flash-sale.', 'middleware' => ['module:promotion']], function () {
+            Route::get('/', [RentalFlashSaleController::class, 'index'])->name('add-new');
+            Route::post('store', [RentalFlashSaleController::class, 'store'])->name('store');
+            Route::get('edit/{id}', [RentalFlashSaleController::class, 'edit'])->name('edit');
+            Route::post('edit/{id}', [RentalFlashSaleController::class, 'update'])->name('update');
+            Route::get('publish/{id}/{publish}', [RentalFlashSaleController::class, 'publish'])->name('publish');
+            Route::get('status/{id}/{status}', [RentalFlashSaleController::class, 'status'])->name('status');
+            Route::delete('delete/{id}', [RentalFlashSaleController::class, 'destroy'])->name('delete');
+
+            Route::post('store-vehicle', [RentalFlashSaleController::class, 'storeVehicle'])->name('store-vehicle');
+            Route::get('vehicle-status/{id}/{status}', [RentalFlashSaleController::class, 'vehicleStatus'])->name('vehicle-status');
+            Route::delete('delete-vehicle/{id}', [RentalFlashSaleController::class, 'destroyVehicle'])->name('delete-vehicle');
         });
 
         Route::group(['prefix' => 'cashback', 'as' => 'cashback.', 'middleware' => ['module:promotion']], function () {
