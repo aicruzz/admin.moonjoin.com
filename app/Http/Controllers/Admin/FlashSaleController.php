@@ -180,7 +180,20 @@ class FlashSaleController extends Controller
 
         $item = Item::find($request->item_id);
 
-        if($request->stock>$item->stock){
+        // Modules that manage inventory (grocery, ecommerce, pharmacy) keep the
+        // existing protection: a flash sale may never allocate more units than the
+        // item actually holds. Modules with 'stock' => false in config/module.php --
+        // food -- never populate items.stock, so it sits at its column default of 0
+        // and any allocation would fail this comparison. For those the entered
+        // quantity is the flash sale allocation cap instead of an inventory draw;
+        // it is still required to be >= 1 by the validator above, and still
+        // decrements through available_stock exactly as it does for every module.
+        //
+        // Fails closed: an unknown module type keeps the inventory check.
+        $module_type = $item?->module?->module_type;
+        $manages_stock = $module_type ? (config('module.' . $module_type)['stock'] ?? true) : true;
+
+        if($manages_stock && $request->stock>$item->stock){
             Toastr::error(translate('messages.Item_stock_exceeded'));
             return back();
         }

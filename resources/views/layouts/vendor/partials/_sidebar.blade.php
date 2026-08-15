@@ -234,7 +234,7 @@
                     @endif
                     <!-- End Order Management -->
 
-                    @if (in_array($store_data->module->module_type, ['grocery', 'ecommerce']))
+                    @if (in_array($store_data->module->module_type, ['grocery', 'ecommerce', 'food']))
                         <li
                             class="navbar-vertical-aside-has-menu {{ Request::is('vendor-panel/item/flash-sale*') ? 'active' : '' }}">
                             <a class="js-navbar-vertical-aside-menu-link nav-link"

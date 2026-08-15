@@ -253,6 +253,22 @@
                     </ul>
                     </li>
                     <!-- Order refund End-->
+
+                    <!-- Flash Sale -->
+                    {{-- Same block as _sidebar_grocery.blade.php. Food reuses the
+                         existing module-generic Flash Sale system; the route and
+                         controller already scope by the selected module. --}}
+                    <li class="navbar-vertical-aside-has-menu {{ Request::is('admin/flash-sale*') ? 'active' : '' }}">
+                        <a class="js-navbar-vertical-aside-menu-link nav-link"
+                           href="{{ route('admin.flash-sale.add-new') }}"
+                           title="{{ translate('messages.flash_sales') }}">
+                            <i class="tio-apps nav-icon"></i>
+                            <span class="navbar-vertical-aside-mini-mode-hidden-elements text-truncate">
+                                {{ translate('messages.flash_sales') }}
+                            </span>
+                        </a>
+                    </li>
+                    <!-- End Flash Sale -->
                     @endif
                     <!-- End Orders -->
 
