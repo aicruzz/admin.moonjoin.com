@@ -186,8 +186,11 @@ class FlashSaleController extends Controller
         // food -- never populate items.stock, so it sits at its column default of 0
         // and any allocation would fail this comparison. For those the entered
         // quantity is the flash sale allocation cap instead of an inventory draw;
-        // it is still required to be >= 1 by the validator above, and still
-        // decrements through available_stock exactly as it does for every module.
+        // it is still required to be >= 1 by the validator above and is still
+        // written to available_stock, which every read path filters on identically
+        // for all modules. Note the engine has never decremented available_stock at
+        // order time -- that is pre-existing behaviour shared by every module, not
+        // something specific to food.
         //
         // Fails closed: an unknown module type keeps the inventory check.
         $module_type = $item?->module?->module_type;

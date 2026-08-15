@@ -1,8 +1,8 @@
 # Flash Sale — Architecture Record
 
 **Scope:** Laravel Admin / backend (`admin.moonjoin.com`) only.
-**Status:** Food enablement **COMPLETE / FROZEN** for this scope.
-**Manual verification:** Implementation validated at code level; manual Food Flash Sale end-to-end verification remains pending.
+**Status:** Food Flash Sale enablement is **COMPLETE and FROZEN**.
+**Manual verification:** Admin Panel flow verified live; User App consumption verified separately (see §7).
 
 ---
 
@@ -59,9 +59,10 @@ Consequences:
   the item actually holds.
 - **Food (`stock => false`)** — the entered quantity is the **allocation cap for the
   Flash Sale**, not an inventory draw. It is still required to be `>= 1` by the
-  existing validator, is still written to `available_stock`, and still decrements as
-  orders are placed. When the allocation is exhausted the item drops out through the
-  existing `available_stock > 0` filtering.
+  existing validator and is still written to `available_stock`, which every read path
+  (`FlashSale::activeProducts()`, `FlashSaleItem::scopeAvailable()`, the API items
+  query, and the `Helpers` pricing paths) filters on identically for all modules.
+  See §9 for a pre-existing engine limitation regarding `available_stock` at order time.
 - **Unknown / null module type** — fails closed; the inventory check is enforced.
 
 This is **not** an unlimited-stock Flash Sale.
@@ -131,19 +132,32 @@ remain rental-specific** regardless of visual reuse.
 There is no Flash Sale automated test suite in this codebase; only the default Laravel
 `ExampleTest` / `TranslateHelperTest` exist.
 
-## 7. Manual verification — PENDING
+## 7. Manual verification — COMPLETE
 
-**Implementation validated at code level; manual Food Flash Sale end-to-end
-verification remains pending.**
+### Admin Panel (verified live)
 
-Highest-value manual checks, in order:
+- Food module exposes the **Flash Sales** menu.
+- Flash Sale Setup contains an active **Pizza** Flash Sale, duration
+  **15/Aug/2026 – 30/Dec/2026**, Active Products **1**, Publish **ON**.
+- Flash Sale Product Setup: Product **Pizza**, Store **Perozona**,
+  Stock For This Sale **50**, Qty Sold **0**, Price **₦3,750**, Status **ON**.
+- Adding the Food item did **not** raise `Item_stock_exceeded` — confirming the
+  module-aware guard (§3) works against `items.stock = 0`.
 
-1. Add a Food item to a Flash Sale — must **not** error `Item_stock_exceeded` (proves the fix).
-2. Over-allocate a Grocery item — must **still** error (proves no regression).
-3. Food: create → add item → publish → confirm module scoping and zone targeting.
-4. Grocery and Fashion: create/publish end-to-end unchanged.
-5. `GET /api/v1/flash-sales` with `moduleId` = Food and a valid `zoneId` returns the sale.
-6. Pharmacy and Rental remain untouched.
+### User App (verified separately, Flutter session)
+
+- Pizza Flash Sale renders with original price **₦7,500**, flash price **₦3,750**,
+  **50% OFF**, **Sold 0/50** — served by the existing unchanged API.
+
+### Grocery regression check (verified live)
+
+- Grocery Flash Sale remains functional and independent; **Mango** shows its existing
+  Flash Sale behaviour and product-detail flow unchanged.
+
+### Not exercised
+
+A Food flash-sale **order** has not yet been placed, so the sold/allocation
+consumption path has not been observed end to end. See §9.
 
 ## 8. Frontend status
 
@@ -154,3 +168,53 @@ User App & Web codebase, against the approved MoonJoin flash card design.
 MoonJoin consists of four separate codebases — Flutter User App & Web, Flutter Vendor
 App, Flutter Delivery Man App, and this Laravel Admin/backend. Frontend and backend work
 must not be combined in one session.
+
+## 9. Audit finding — pre-existing engine limitation (NOT a Food regression)
+
+A repo-wide search of `app/` and `Modules/` finds **no code that increments
+`FlashSaleItem.sold` or decrements `available_stock` when an order is placed**. The only
+write is at creation:
+
+```
+app/Http/Controllers/Admin/FlashSaleController.php:205
+    $flash_sale->available_stock = $request->stock;
+```
+
+`FlashSaleItem` is otherwise **read-only** across the application — `Models/Item.php:155`
+(relation), `ProductLogic.php:1093` / `item.php:1093`, and the `Helpers` pricing paths.
+`ProductLogic.php:1100` computes `available_stock = stock - sold` **in memory on a fetched
+model for display only**; it is never persisted. `Traits/PlaceNewOrder.php` uses flash-sale
+discount amounts but never touches `FlashSaleItem`.
+
+**Consequences:** "Qty Sold" is expected to remain `0`, and a flash sale allocation is not
+expected to deplete through ordering.
+
+**Scope:** this is **pre-existing behaviour of the shared engine, identical for Grocery,
+Ecommerce and Food**. It was not introduced, altered, or worsened by the Food enablement,
+and Food behaves exactly as the already-live modules do.
+
+**Deliberately not fixed here.** Implementing depletion would change Grocery and Ecommerce
+behaviour and would require modifying order-placement logic — both outside this frozen
+scope. Recorded for a future, separately-approved decision.
+
+## 10. Freeze record
+
+**Food Flash Sale enablement is COMPLETE and FROZEN.**
+
+- Flash Sale remains **module-generic**; `module_id` and module scoping remain the source of truth.
+- **Food is now an enabled module** on the existing engine.
+- Food uses **allocation-cap semantics**; modules with `stock => true` keep their inventory protection.
+- **No migration or schema change** was introduced.
+- **No API contract change** was introduced.
+- **No Flutter change** was required in this codebase.
+- **Existing Grocery behaviour remains unchanged** (verified live — see §7).
+- **Pharmacy remains intentionally excluded.**
+- **Rental remains intentionally excluded** and must not be extended into `flash_sale_items` (§5).
+- **Admin Food Flash Sale flow was manually verified** in the live Admin Panel (§7).
+- **User App Food Flash Sale consumption was manually verified separately** (§7).
+
+Validation at freeze: `php -l` clean; both changed Blade templates compile and their
+compiled output lints clean; `tests/Unit` passes 10/10; module-aware guard logic table
+confirms grocery/ecommerce/pharmacy ENFORCED, food SKIPPED, null/unknown ENFORCED.
+
+No further work is required on this scope unless a new approved requirement is introduced.
