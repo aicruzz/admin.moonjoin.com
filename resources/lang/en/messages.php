@@ -9439,4 +9439,5 @@ Smartly or Earn. ',
     'order_is_already_in_this_status' => 'This order is already in that status',
     'order_status_overridden_settlement_still_owed' => 'Order status overridden and recorded. The vendor settlement for this order is still owed.',
     'you_can_not_change_the_status_of_this_order' => 'You can not change the status of this order',
+    'flash_sale_stock_not_available' => 'The flash sale allocation for one of your items is no longer available. Please update your cart and try again.',
 );

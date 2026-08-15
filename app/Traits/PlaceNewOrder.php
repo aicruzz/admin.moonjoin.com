@@ -163,6 +163,9 @@ trait PlaceNewOrder
             $store_discount_amount = 0;
             $flash_sale_vendor_discount_amount = 0;
             $flash_sale_admin_discount_amount = 0;
+            // Assigned from makeOrderDetails() only on the non-parcel, non-prescription
+            // path; initialised here so the depletion loop is a no-op elsewhere.
+            $flash_sale_data = [];
             $coupon_discount_amount = 0;
 
             $product_data = [];
@@ -328,6 +331,7 @@ trait PlaceNewOrder
                     $flash_sale_admin_discount_amount = $order_details['flash_sale_admin_discount_amount'];
                     $flash_sale_vendor_discount_amount = $order_details['flash_sale_vendor_discount_amount'];
                     $product_data = $order_details['product_data'];
+                    $flash_sale_data = $order_details['flash_sale_data'] ?? [];
                     $order_details = $order_details['order_details'];
                 }
 
@@ -515,9 +519,28 @@ trait PlaceNewOrder
                 if (count($product_data) > 0) {
                     foreach ($product_data as $item) {
                         ProductLogic::update_stock($item['item'], $item['quantity'], $item['variant'])->save();
-                        ProductLogic::update_flash_stock($item['item'], $item['quantity'])?->save();
                     }
                 }
+
+                // Single authoritative flash sale depletion path, inside the order
+                // transaction. Moved out of the $product_data loop above so it runs for
+                // every module rather than only those with stock => true, and so a
+                // stock-managing module can never be counted twice.
+                //
+                // update_flash_stock() reserves atomically; a null return means the
+                // remaining allocation is gone (or the sale stopped running between
+                // pricing and placement), so the order must not complete.
+                foreach ($flash_sale_data as $flash_sale_line) {
+                    if (!ProductLogic::update_flash_stock($flash_sale_line['item'], $flash_sale_line['quantity'])) {
+                        DB::rollBack();
+                        return response()->json([
+                            'errors' => [
+                                ['code' => 'flash_sale', 'message' => translate('messages.flash_sale_stock_not_available')]
+                            ]
+                        ], 403);
+                    }
+                }
+
                 $store->increment('total_order');
             }
             if (count($orderTaxIds)) {
@@ -1002,6 +1025,10 @@ trait PlaceNewOrder
         $flash_sale_vendor_discount_amount = 0;
         $flash_sale_admin_discount_amount = 0;
         $product_data = [];
+        // Flash sale lines are collected independently of $product_data. $product_data
+        // is only built for modules whose config has stock => true, so food never
+        // reached the flash sale depletion that ran inside that loop.
+        $flash_sale_data = [];
         $order_details = [];
         $discount_type = '';
         $discount_on_product_by = 'vendor';
@@ -1079,6 +1106,12 @@ trait PlaceNewOrder
                     }
                 }
 
+                // Kept before formatting: the flash sale engine matches on
+                // flash_sale_items.item_id, so the unformatted Item model is what
+                // ProductLogic::update_flash_stock() needs. Campaigns are excluded
+                // because ItemCampaign ids are not item ids.
+                $unformatted_product = $isCampaign ? null : clone $product;
+
                 $product = Helpers::product_data_formatting($product, false, false, app()->getLocale());
                 $addon_data = Helpers::calculate_addon_price(AddOn::whereIn('id', $c['add_on_ids'])->get(), $c['add_on_qtys']);
                 $product_discount = Helpers::product_discount_calculate($product, $price, $store, false);
@@ -1121,6 +1154,17 @@ trait PlaceNewOrder
                 $store_discount_amount += $or_d['discount_type'] != 'flash_sale' ? $or_d['discount_on_item'] * $or_d['quantity'] : 0;
                 $flash_sale_admin_discount_amount += $or_d['discount_type'] == 'flash_sale' ? $product_discount['admin_discount_amount'] * $or_d['quantity'] : 0;
                 $flash_sale_vendor_discount_amount += $or_d['discount_type'] == 'flash_sale' ? $product_discount['vendor_discount_amount'] * $or_d['quantity'] : 0;
+
+                // The same condition that grants the flash sale price records the line
+                // for depletion, so pricing and allocation can never disagree. Quantity
+                // is the real ordered quantity, not one unit per line.
+                if ($or_d['discount_type'] == 'flash_sale' && $unformatted_product) {
+                    $flash_sale_data[] = [
+                        'item' => $unformatted_product,
+                        'quantity' => $or_d['quantity'],
+                    ];
+                }
+
                 $order_details[] = $or_d;
                 $addon_data[] = $addon_data['addons'];
             } else {
@@ -1162,7 +1206,8 @@ trait PlaceNewOrder
             'discount_on_product_by' => $discount_on_product_by == 'store_discount' ? 'admin' : 'vendor',
             'flash_sale_admin_discount_amount' => $flash_sale_admin_discount_amount,
             'flash_sale_vendor_discount_amount' => $flash_sale_vendor_discount_amount,
-            'product_data' => $product_data
+            'product_data' => $product_data,
+            'flash_sale_data' => $flash_sale_data
 
         ];
     }

@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\PriorityList;
 use App\Models\FlashSaleItem;
 use App\Models\BusinessSetting;
+use Illuminate\Support\Facades\DB;
 
 
 class ProductLogic
@@ -1088,18 +1089,52 @@ class ProductLogic
         return $item;
     }
 
+    /**
+     * Reserve flash sale allocation for a purchased quantity.
+     *
+     * The previous implementation read sold, added the quantity in PHP and left the
+     * caller to save(). Two concurrent buyers could both read the same sold value and
+     * both write, overselling the allocation and driving available_stock negative.
+     *
+     * The reservation is now a single conditional UPDATE. InnoDB evaluates
+     * available_stock >= $quantity while holding the row lock, so concurrent buyers
+     * serialise and the allocation can never be oversold. Callers already run inside
+     * the order transaction, so a rollback releases the reservation.
+     *
+     * Returns the refreshed FlashSaleItem when the reservation succeeded, or null when
+     * the item has no running flash sale or the remaining allocation is insufficient.
+     * Existing callers use `?->save()`, which stays a harmless no-op either way.
+     */
     public static function update_flash_stock($item, $quantity)
     {
-        $item = FlashSaleItem::Active()->whereHas('flashSale', function ($query) {
+        $quantity = (int) $quantity;
+
+        if ($quantity < 1) {
+            return null;
+        }
+
+        $flash_sale_item = FlashSaleItem::Active()->whereHas('flashSale', function ($query) {
             $query->Active()->Running();
         })
         ->where(['item_id' => $item->id])->first();
-        if($item){
 
-            $item->sold = $item->sold + $quantity;
-            $item->available_stock = $item->stock - $item->sold;
+        if (!$flash_sale_item) {
+            return null;
         }
-        return $item;
+
+        $reserved = FlashSaleItem::where('id', $flash_sale_item->id)
+            ->where('available_stock', '>=', $quantity)
+            ->update([
+                'sold' => DB::raw('sold + ' . $quantity),
+                'available_stock' => DB::raw('available_stock - ' . $quantity),
+                'updated_at' => now(),
+            ]);
+
+        if ($reserved === 0) {
+            return null;
+        }
+
+        return $flash_sale_item->refresh();
     }
 
     public static function cart_suggest_products($zone_id,$store_id,$limit = null, $offset = null, $type='all',$recomended=false)

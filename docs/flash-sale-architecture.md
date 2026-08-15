@@ -62,7 +62,7 @@ Consequences:
   existing validator and is still written to `available_stock`, which every read path
   (`FlashSale::activeProducts()`, `FlashSaleItem::scopeAvailable()`, the API items
   query, and the `Helpers` pricing paths) filters on identically for all modules.
-  See §9 for a pre-existing engine limitation regarding `available_stock` at order time.
+  It is depleted at order time exactly as every other module is — see §9.
 - **Unknown / null module type** — fails closed; the inventory check is enforced.
 
 This is **not** an unlimited-stock Flash Sale.
@@ -129,8 +129,9 @@ remain rental-specific** regardless of visual reuse.
 | `phpunit tests/Unit` | OK — 10 tests, 27 assertions (1 pre-existing deprecation) |
 | Module-aware guard logic table | grocery/ecommerce/pharmacy ENFORCED; food SKIPPED; null/unknown ENFORCED |
 
-There is no Flash Sale automated test suite in this codebase; only the default Laravel
-`ExampleTest` / `TranslateHelperTest` exist.
+Flash sale allocation accounting is covered by
+`tests/Feature/FlashSaleAllocationTest.php` (6 tests, 29 assertions), added with the §9
+depletion work. Full suite: 17 tests, 57 assertions, passing.
 
 ## 7. Manual verification — COMPLETE
 
@@ -169,33 +170,52 @@ MoonJoin consists of four separate codebases — Flutter User App & Web, Flutter
 App, Flutter Delivery Man App, and this Laravel Admin/backend. Frontend and backend work
 must not be combined in one session.
 
-## 9. Audit finding — pre-existing engine limitation (NOT a Food regression)
+## 9. Order-time depletion — CORRECTED
 
-A repo-wide search of `app/` and `Modules/` finds **no code that increments
-`FlashSaleItem.sold` or decrements `available_stock` when an order is placed**. The only
-write is at creation:
+**An earlier revision of this section was wrong.** It claimed that no code updates
+`FlashSaleItem.sold` / `available_stock` at order time. That statement was false and is
+retracted. `ProductLogic::update_flash_stock()` already existed and already performed the
+depletion; the earlier audit searched for direct column writes and missed the helper.
 
-```
-app/Http/Controllers/Admin/FlashSaleController.php:205
-    $flash_sale->available_stock = $request->stock;
-```
+### What was actually true
 
-`FlashSaleItem` is otherwise **read-only** across the application — `Models/Item.php:155`
-(relation), `ProductLogic.php:1093` / `item.php:1093`, and the `Helpers` pricing paths.
-`ProductLogic.php:1100` computes `available_stock = stock - sold` **in memory on a fetched
-model for display only**; it is never persisted. `Traits/PlaceNewOrder.php` uses flash-sale
-discount amounts but never touches `FlashSaleItem`.
+- `ProductLogic::update_flash_stock()` incremented `sold`, recomputed
+  `available_stock = stock - sold`, and was persisted by the caller's `?->save()`.
+- It was called from five order/POS paths: `PlaceNewOrder.php`,
+  `Admin/OrderController.php`, `Admin/POSController.php`, `Vendor/OrderController.php`,
+  `Vendor/POSController.php`.
+- **Grocery and Ecommerce therefore already depleted correctly.**
+- **Food did not.** Every call site ran the helper inside
+  `if (count($product_data) > 0)`, and `$product_data` is only populated under
+  `config('module.'.$type)['stock']`. Food has `stock => false`, so the loop never ran and
+  `sold` stayed at `0` — exactly the "Qty Sold 0/50" seen on the Pizza sale.
 
-**Consequences:** "Qty Sold" is expected to remain `0`, and a flash sale allocation is not
-expected to deplete through ordering.
+### The approved fix
 
-**Scope:** this is **pre-existing behaviour of the shared engine, identical for Grocery,
-Ecommerce and Food**. It was not introduced, altered, or worsened by the Food enablement,
-and Food behaves exactly as the already-live modules do.
+1. **Depletion no longer depends on the module stock flag.** `makeOrderDetails()` collects
+   a dedicated `$flash_sale_data[]` for every line whose `discount_type == 'flash_sale'`,
+   using the real ordered quantity. The same condition that grants the flash sale price
+   records the line for depletion, so pricing and allocation cannot disagree.
+2. **One authoritative path.** The helper call was removed from the `$product_data` loop in
+   `PlaceNewOrder.php` and replaced by a single loop over `$flash_sale_data`, so a
+   stock-managing module can never be counted twice.
+3. **Overselling is now impossible.** `update_flash_stock()` performs a single conditional
+   `UPDATE ... WHERE id = ? AND available_stock >= ?`. InnoDB evaluates the predicate under
+   the row lock, so concurrent buyers serialise. A zero-row result returns `null`, and the
+   order rolls back with a `flash_sale` 403 rather than completing.
+4. **Transactional.** Depletion runs inside the existing order transaction, so a failed
+   order consumes no allocation and a successful order always consumes it.
+5. Callers still receive a model-or-null, so the four POS/admin/vendor call sites keep
+   working unchanged and gain the same oversell protection.
 
-**Deliberately not fixed here.** Implementing depletion would change Grocery and Ecommerce
-behaviour and would require modifying order-placement logic — both outside this frozen
-scope. Recorded for a future, separately-approved decision.
+### Deliberately unchanged
+
+- **Cancellation / refund does not restore allocation** (approved decision). Normal product
+  stock is restored via `update_stock($item, -$qty, …)`; flash sale allocation is not, and
+  that asymmetry is retained. A separate approved requirement may revisit it.
+- **`Helpers::product_discount_calculate()` is untouched** (approved decision "D3"). It
+  still matches on `item_id` without an `available_stock > 0` condition. If a depleted sale
+  reaches placement, the atomic guard rejects the order rather than silently repricing.
 
 ## 10. Freeze record
 

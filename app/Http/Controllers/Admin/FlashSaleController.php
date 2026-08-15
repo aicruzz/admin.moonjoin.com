@@ -188,9 +188,8 @@ class FlashSaleController extends Controller
         // quantity is the flash sale allocation cap instead of an inventory draw;
         // it is still required to be >= 1 by the validator above and is still
         // written to available_stock, which every read path filters on identically
-        // for all modules. Note the engine has never decremented available_stock at
-        // order time -- that is pre-existing behaviour shared by every module, not
-        // something specific to food.
+        // for all modules, and is depleted at order time by
+        // ProductLogic::update_flash_stock() for every module alike.
         //
         // Fails closed: an unknown module type keeps the inventory check.
         $module_type = $item?->module?->module_type;
