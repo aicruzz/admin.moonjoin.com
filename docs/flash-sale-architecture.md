@@ -189,10 +189,20 @@ It resolves through the same `RentalFlashSaleVehicle::resolveFor()` the booking 
 uses, with the module taken from the provider's store, so **the price displayed and the
 price charged cannot come from different campaigns or different modules**.
 
-Exposed: `title`, `discount_type`, `discount`, `applies_to`, `start_date`, `end_date`, and
-per-axis `original_price` / `flash_price` / `discount_amount` for the axes the campaign
-covers. `redeemed` and `redemption_cap` are deliberately **not** exposed -- no product
-requirement needs them and they are mutable internals.
+Exposed: `title`, `discount_type`, `discount`, `discount_applies_to`, `applies_to`,
+`start_date`, `end_date`, and per-axis `original_price` / `flash_price` /
+`discount_amount` for the axes the campaign covers. `redeemed` and `redemption_cap` are
+deliberately **not** exposed -- no product requirement needs them and they are mutable
+internals.
+
+**Percent vs amount.** A percentage scales with the axis quantity, so a per-unit flash
+price is exact and `discount_applies_to` is `unit_price`. A flat amount does not scale:
+TripController computes the rental total and subtracts the amount **once**, so there is no
+per-unit flash price to publish. For amount campaigns `flash_price` and `discount_amount`
+are `null`, `discount_applies_to` is `booking_total`, and the consumer applies `discount`
+after computing the total. Publishing a per-unit figure would have advertised 500 off a
+1000/hour vehicle as 2000 for four hours when 3500 is charged -- the display/charge
+mismatch found in the final audit. Booking semantics were not changed to fix it.
 
 Known cost: the accessor resolves per vehicle, so a large listing performs one campaign
 lookup per row. Acceptable for correctness; revisit with eager loading if listing latency

@@ -136,14 +136,25 @@ class Vehicle extends Model
             'day_wise' => (float) ($this->day_wise_price ?? 0),
         ];
 
+        // A percentage scales with the axis quantity, so a per-unit flash price is
+        // exact: 50% off the hourly rate is 50% off any number of hours.
+        //
+        // A flat amount does not scale. TripController computes the rental total first
+        // and subtracts the amount from it once, so there is no per-unit flash price to
+        // publish. Advertising one would imply the amount comes off every hour, day or
+        // kilometre -- 500 off a 1000/hour vehicle would read as 2000 for four hours
+        // when 3500 is charged. The per-unit flash price is therefore withheld for
+        // amount campaigns, and discount_applies_to says which basis is in play.
+        $is_percent = $campaign_vehicle->discount_type === 'percent';
+
         $prices = [];
         foreach ($axes as $axis) {
             $original = $base[$axis] ?? 0;
-            $discount = $campaign_vehicle->discountFor($original);
+            $discount = $is_percent ? $campaign_vehicle->discountFor($original) : null;
             $prices[$axis] = [
                 'original_price' => round($original, 2),
-                'flash_price' => round(max(0, $original - $discount), 2),
-                'discount_amount' => round($discount, 2),
+                'flash_price' => $discount === null ? null : round(max(0, $original - $discount), 2),
+                'discount_amount' => $discount === null ? null : round($discount, 2),
             ];
         }
 
@@ -151,6 +162,11 @@ class Vehicle extends Model
             'title' => $campaign?->title,
             'discount_type' => $campaign_vehicle->discount_type,
             'discount' => (float) $campaign_vehicle->discount,
+            // 'unit_price'    -> the discount applies to each unit, so flash_price is exact
+            // 'booking_total' -> the discount applies once to the calculated total, so
+            //                    flash_price is null and the consumer applies `discount`
+            //                    after computing the total.
+            'discount_applies_to' => $is_percent ? 'unit_price' : 'booking_total',
             'applies_to' => $campaign_vehicle->applies_to,
             'start_date' => $campaign?->start_date?->toDateTimeString(),
             'end_date' => $campaign?->end_date?->toDateTimeString(),

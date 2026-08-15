@@ -286,6 +286,137 @@ class RentalFlashSaleTest extends TestCase
         $this->assertFalse($row->reserve(1), 'an exhausted campaign refuses further redemptions');
     }
 
+    // --------------------------------------------- API representation vs booking
+
+    /**
+     * A Vehicle whose provider relation is stubbed, so the accessor can be exercised
+     * without a vehicles/stores fixture (both carry global scopes).
+     */
+    private function vehicleFor(int $module_id): \Modules\Rental\Entities\Vehicle
+    {
+        $store = new \App\Models\Store();
+        $store->module_id = $module_id;
+
+        $vehicle = new \Modules\Rental\Entities\Vehicle();
+        $vehicle->id = 77;
+        $vehicle->hourly_price = 1000;
+        $vehicle->distance_price = 200;
+        $vehicle->day_wise_price = 8000;
+        $vehicle->setRelation('provider', $store);
+
+        return $vehicle;
+    }
+
+    public function test_a_percent_campaign_publishes_an_exact_per_unit_flash_price(): void
+    {
+        $this->attach($this->campaign(), ['discount_type' => 'percent', 'discount' => 50]);
+
+        $payload = $this->vehicleFor(self::CAR_RENTAL)->flash_sale;
+
+        $this->assertSame('unit_price', $payload['discount_applies_to']);
+        $this->assertSame(1000.0, $payload['prices']['hourly']['original_price']);
+        $this->assertSame(500.0, $payload['prices']['hourly']['flash_price']);
+        $this->assertSame(500.0, $payload['prices']['hourly']['discount_amount']);
+    }
+
+    public function test_a_percent_flash_price_agrees_with_what_booking_charges(): void
+    {
+        $row = $this->attach($this->campaign(), ['discount_type' => 'percent', 'discount' => 50]);
+        $payload = $this->vehicleFor(self::CAR_RENTAL)->flash_sale;
+
+        // TripController: hourly_price * hours, then the campaign discount.
+        $hours = 4;
+        $booking_total = 1000 * $hours;
+        $charged = $booking_total - $row->discountFor($booking_total);
+
+        // The advertised per-hour flash price, multiplied out, must equal the charge.
+        $implied = $payload['prices']['hourly']['flash_price'] * $hours;
+
+        $this->assertSame(2000.0, $charged);
+        $this->assertSame($charged, $implied, 'a percentage scales, so per-unit advertising is exact');
+    }
+
+    public function test_an_amount_campaign_does_not_publish_a_misleading_per_unit_price(): void
+    {
+        $this->attach($this->campaign(), ['discount_type' => 'amount', 'discount' => 500]);
+
+        $payload = $this->vehicleFor(self::CAR_RENTAL)->flash_sale;
+
+        $this->assertSame('booking_total', $payload['discount_applies_to']);
+        $this->assertSame('amount', $payload['discount_type']);
+        $this->assertSame(500.0, $payload['discount'], 'the flat amount is still published');
+
+        // The per-unit price is real; a per-unit flash price is not.
+        $this->assertSame(1000.0, $payload['prices']['hourly']['original_price']);
+        $this->assertNull($payload['prices']['hourly']['flash_price']);
+        $this->assertNull($payload['prices']['hourly']['discount_amount']);
+    }
+
+    public function test_the_reported_defect_scenario_can_no_longer_occur(): void
+    {
+        // hourly_price 1000, 4-hour booking, flat 500 off.
+        $row = $this->attach($this->campaign(), ['discount_type' => 'amount', 'discount' => 500]);
+        $payload = $this->vehicleFor(self::CAR_RENTAL)->flash_sale;
+
+        $hours = 4;
+        $charged = (1000 * $hours) - $row->discountFor(1000 * $hours);
+
+        $this->assertSame(3500.0, $charged, 'the flat amount comes off the total exactly once');
+        $this->assertNull(
+            $payload['prices']['hourly']['flash_price'],
+            'the API must not advertise 500/hour, which would imply 2000 for four hours'
+        );
+    }
+
+    public function test_amount_campaigns_still_respect_applies_to(): void
+    {
+        $this->attach($this->campaign(), [
+            'discount_type' => 'amount',
+            'discount' => 500,
+            'applies_to' => 'day_wise',
+        ]);
+
+        $payload = $this->vehicleFor(self::CAR_RENTAL)->flash_sale;
+
+        $this->assertSame(['day_wise'], array_keys($payload['prices']));
+        $this->assertSame(8000.0, $payload['prices']['day_wise']['original_price']);
+        $this->assertNull($payload['prices']['day_wise']['flash_price']);
+    }
+
+    public function test_applies_to_all_exposes_every_axis(): void
+    {
+        $this->attach($this->campaign(), ['discount_type' => 'percent', 'discount' => 25, 'applies_to' => 'all']);
+
+        $payload = $this->vehicleFor(self::CAR_RENTAL)->flash_sale;
+
+        $this->assertSame(['hourly', 'distance_wise', 'day_wise'], array_keys($payload['prices']));
+        $this->assertSame(150.0, $payload['prices']['distance_wise']['flash_price']);
+        $this->assertSame(6000.0, $payload['prices']['day_wise']['flash_price']);
+    }
+
+    public function test_the_api_hides_a_campaign_from_the_wrong_module(): void
+    {
+        $this->attach($this->campaign(['module_id' => self::CAR_RENTAL]));
+
+        $this->assertNotNull($this->vehicleFor(self::CAR_RENTAL)->flash_sale);
+        $this->assertNull($this->vehicleFor(self::SHORT_APT_RENTAL)->flash_sale);
+    }
+
+    public function test_the_api_hides_an_exhausted_campaign(): void
+    {
+        $this->attach($this->campaign(), ['redemption_cap' => 5, 'redeemed' => 5]);
+
+        $this->assertNull(
+            $this->vehicleFor(self::CAR_RENTAL)->flash_sale,
+            'an exhausted campaign must stop advertising a flash price'
+        );
+    }
+
+    public function test_the_api_returns_null_when_no_campaign_runs(): void
+    {
+        $this->assertNull($this->vehicleFor(self::CAR_RENTAL)->flash_sale);
+    }
+
     // ------------------------------------------------------- overlapping campaigns
 
     public function test_an_overlapping_campaign_for_the_same_vehicle_is_detected(): void
