@@ -185,6 +185,14 @@
                             </a>
                         </li>
                         <!-- End Coupon -->
+                        <!-- Rental Flash Sale -->
+                        <li class="navbar-vertical-aside-has-menu {{ Request::is('admin/rental/flash-sale*') ? 'active' : '' }}">
+                            <a class="js-navbar-vertical-aside-menu-link nav-link" href="{{ route('admin.rental.flash-sale.add-new') }}" title="{{ translate('messages.rental_flash_sales') }}">
+                                <i class="tio-flash nav-icon"></i>
+                                <span class="navbar-vertical-aside-mini-mode-hidden-elements text-truncate">{{ translate('messages.rental_flash_sales') }}</span>
+                            </a>
+                        </li>
+                        <!-- End Rental Flash Sale -->
                          <li class="navbar-vertical-aside-has-menu {{ Request::is('admin/rental/cashback*') ? 'active' : '' }}">
                             <a class="js-navbar-vertical-aside-menu-link nav-link" href="{{ route('admin.rental.cashback.list') }}" title="{{ translate('messages.cashback') }}">
                                 <i class="tio-settings-back nav-icon"></i>
