@@ -38,8 +38,9 @@
             </div>
         </div>
 
-        {{-- Attach a vehicle. The controller re-checks that the vehicle's provider
-             belongs to this campaign's module, so a mistyped id cannot cross modules. --}}
+        {{-- Attach a vehicle. The picker only offers vehicles from this campaign's
+             module, and the controller re-checks the provider relationship on submit,
+             so a crafted request cannot cross modules either. --}}
         <div class="card mb-3">
             <div class="card-header">
                 <h5 class="card-title">{{ translate('messages.add_vehicle') }}</h5>
@@ -49,9 +50,28 @@
                     @csrf
                     <input type="hidden" name="rental_flash_sale_id" value="{{ $flash_sale->id }}">
                     <div class="row g-3">
-                        <div class="col-md-2">
-                            <label class="input-label">{{ translate('messages.vehicle_id') }}</label>
-                            <input type="number" name="vehicle_id" class="form-control" required min="1">
+                        {{-- Searchable vehicle picker. js-select2-custom is initialised
+                             globally by public/assets/admin/js/app-blade/admin.js, which
+                             supplies the in-dropdown search box, so no page script is
+                             needed. The option text carries the vehicle name, its id and
+                             the provider name, so select2's own search matches any of
+                             the three. The submitted value stays the real vehicle id. --}}
+                        <div class="col-md-4">
+                            <label class="input-label">{{ translate('messages.vehicle') }}</label>
+                            <select name="vehicle_id" class="form-control js-select2-custom" required
+                                    title="{{ translate('messages.select_vehicle') }}">
+                                <option value="">{{ translate('messages.select_vehicle') }}</option>
+                                @foreach ($selectable_vehicles as $selectable)
+                                    {{-- Vehicle first, then the owning provider, which is what an
+                                         admin recognises. The id trails as a secondary reference
+                                         and is never something they have to know or type. All
+                                         three are in the option text, so select2's search matches
+                                         a vehicle name or a provider name equally. --}}
+                                    <option value="{{ $selectable->id }}">
+                                        {{ $selectable->name }} &mdash; {{ $selectable->provider?->name }} (#{{ $selectable->id }})
+                                    </option>
+                                @endforeach
+                            </select>
                         </div>
                         <div class="col-md-2">
                             <label class="input-label">{{ translate('messages.discount_type') }}</label>
@@ -64,7 +84,7 @@
                             <label class="input-label">{{ translate('messages.discount') }}</label>
                             <input type="number" step="0.01" min="0.01" name="discount" class="form-control" required>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <label class="input-label">{{ translate('messages.applies_to') }}</label>
                             <select name="applies_to" class="form-control">
                                 <option value="all">{{ translate('messages.all') }}</option>
@@ -73,7 +93,7 @@
                                 <option value="day_wise">{{ translate('messages.day_wise') }}</option>
                             </select>
                         </div>
-                        <div class="col-md-2">
+                        <div class="col-md-1">
                             <label class="input-label">{{ translate('messages.redemption_cap') }}</label>
                             <input type="number" name="redemption_cap" class="form-control" min="1"
                                    placeholder="{{ translate('messages.unlimited') }}">

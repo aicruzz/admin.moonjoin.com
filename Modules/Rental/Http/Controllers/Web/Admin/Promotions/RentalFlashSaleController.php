@@ -87,7 +87,22 @@ class RentalFlashSaleController extends Controller
             ->where('rental_flash_sale_id', $flash_sale->id)
             ->paginate(config('default_pagination'));
 
-        return view('rental::admin.flash-sale.edit', compact('flash_sale', 'vehicles'));
+        // Vehicles the admin may still attach. Scoped to the campaign's module through
+        // the provider relationship -- the same authoritative check storeVehicle()
+        // re-applies on submit -- and with the already-attached ones removed so a
+        // duplicate cannot be picked in the first place.
+        $attached_vehicle_ids = RentalFlashSaleVehicle::where('rental_flash_sale_id', $flash_sale->id)
+            ->pluck('vehicle_id');
+
+        $selectable_vehicles = Vehicle::with('provider')
+            ->whereHas('provider', function ($query) use ($flash_sale) {
+                $query->where('module_id', $flash_sale->module_id);
+            })
+            ->whereNotIn('id', $attached_vehicle_ids)
+            ->orderBy('name')
+            ->get();
+
+        return view('rental::admin.flash-sale.edit', compact('flash_sale', 'vehicles', 'selectable_vehicles'));
     }
 
     public function update(Request $request, $id)
