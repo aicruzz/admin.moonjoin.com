@@ -94,7 +94,7 @@ class RentalFlashSaleController extends Controller
         $attached_vehicle_ids = RentalFlashSaleVehicle::where('rental_flash_sale_id', $flash_sale->id)
             ->pluck('vehicle_id');
 
-        $selectable_vehicles = Vehicle::with('provider')
+        $selectable_vehicles = Vehicle::with(['provider', 'category'])
             ->whereHas('provider', function ($query) use ($flash_sale) {
                 $query->where('module_id', $flash_sale->module_id);
             })
@@ -102,7 +102,16 @@ class RentalFlashSaleController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('rental::admin.flash-sale.edit', compact('flash_sale', 'vehicles', 'selectable_vehicles'));
+        // Rental type is vehicle_categories -- 'Car Rental', 'Short Apt Rental' and so
+        // on. There is a single rental module, so module_id cannot separate them; the
+        // category is the source of truth. Grouping the picker by it lets the admin see
+        // only the type they intend, and storeVehicle() enforces the same rule.
+        $selectable_vehicles = $selectable_vehicles->groupBy(fn ($vehicle) => $vehicle->category?->name ?: translate('messages.uncategorized'));
+
+        // Once a campaign holds a vehicle, its rental type is fixed to that category.
+        $campaign_category = $this->campaignCategoryId($flash_sale->id);
+
+        return view('rental::admin.flash-sale.edit', compact('flash_sale', 'vehicles', 'selectable_vehicles', 'campaign_category'));
     }
 
     public function update(Request $request, $id)
@@ -233,6 +242,20 @@ class RentalFlashSaleController extends Controller
             return back();
         }
 
+        // Rental type consistency. Car Rental and Short Apt Rental are vehicle
+        // categories inside the one rental module, so module scoping cannot separate
+        // them -- a campaign would otherwise be able to mix a car and an apartment and
+        // advertise one promotion across two different rental products. The rule is
+        // derived from what is already attached, so no column is needed and existing
+        // campaigns keep working.
+        $campaign_category = $this->campaignCategoryId($flash_sale->id);
+
+        if ($campaign_category !== null && (int) $vehicle->category_id !== (int) $campaign_category) {
+            Toastr::error(translate('messages.flash_sale_vehicles_must_share_one_rental_type'));
+
+            return back();
+        }
+
         if ($this->violatesDiscountRules($request, $vehicle)) {
             return back();
         }
@@ -313,6 +336,22 @@ class RentalFlashSaleController extends Controller
         return RentalFlashSale::where('id', $id)
             ->where('module_id', Config::get('module.current_module_id'))
             ->first();
+    }
+
+    /**
+     * The rental type a campaign is already committed to, as a vehicle category id, or
+     * null while it holds no vehicles yet and any type may still be chosen.
+     */
+    private function campaignCategoryId($flash_sale_id): ?int
+    {
+        $category_id = RentalFlashSaleVehicle::where('rental_flash_sale_id', $flash_sale_id)
+            ->with('vehicle:id,category_id')
+            ->get()
+            ->pluck('vehicle.category_id')
+            ->filter()
+            ->first();
+
+        return $category_id === null ? null : (int) $category_id;
     }
 
     private function isRentalModule($module_id): bool

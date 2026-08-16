@@ -61,15 +61,20 @@
                             <select name="vehicle_id" class="form-control js-select2-custom" required
                                     title="{{ translate('messages.select_vehicle') }}">
                                 <option value="">{{ translate('messages.select_vehicle') }}</option>
-                                @foreach ($selectable_vehicles as $selectable)
-                                    {{-- Vehicle first, then the owning provider, which is what an
-                                         admin recognises. The id trails as a secondary reference
-                                         and is never something they have to know or type. All
-                                         three are in the option text, so select2's search matches
-                                         a vehicle name or a provider name equally. --}}
-                                    <option value="{{ $selectable->id }}">
-                                        {{ $selectable->name }} &mdash; {{ $selectable->provider?->name }} (#{{ $selectable->id }})
-                                    </option>
+                                {{-- Grouped by rental type (vehicle category): Car Rental,
+                                     Short Apt Rental, and any other configured category. Within a
+                                     group the vehicle comes first, then its owning provider, which
+                                     is what an admin recognises; the id trails as a secondary
+                                     reference they never have to type. All three are in the option
+                                     text, so select2's search matches vehicle or provider alike. --}}
+                                @foreach ($selectable_vehicles as $category_name => $group)
+                                    <optgroup label="{{ $category_name }}">
+                                        @foreach ($group as $selectable)
+                                            <option value="{{ $selectable->id }}">
+                                                {{ $selectable->name }} &mdash; {{ $selectable->provider?->name }} (#{{ $selectable->id }})
+                                            </option>
+                                        @endforeach
+                                    </optgroup>
                                 @endforeach
                             </select>
                         </div>

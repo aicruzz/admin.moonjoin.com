@@ -208,11 +208,41 @@ Known cost: the accessor resolves per vehicle, so a large listing performs one c
 lookup per row. Acceptable for correctness; revisit with eager loading if listing latency
 becomes a concern.
 
-### Car Rental vs Short Apt Rental
+### Car Rental vs Short Apt Rental — corrected
 
-Identical in code -- same `vehicles`, `trips`, pricing and statuses. There is no apartment
-entity anywhere in `Modules/Rental/`; a "Short Apt Rental" listing is a `Vehicle` row. One
-implementation serves both, separated only by `module_id`.
+An earlier revision of this record stated that Car Rental and Short Apt Rental are two
+`modules` rows both of `module_type = 'rental'`. **That was wrong.** Production data shows
+a single rental module:
+
+```
+module_id=14  name='Car & Apt Rental'  module_type='rental'
+```
+
+and the rental type is a **vehicle category**:
+
+```
+vehicle_categories: 1 = 'Car Rental', 2 = 'Short Apt Rental', 3 = 'Luxury Cars'
+```
+
+So `vehicles.category_id` is the source of truth for rental type, not `module_id`. Both
+Car Rental and Short Apt Rental are `Vehicle` records; there is no apartment entity and
+none is needed.
+
+**Consequence for campaigns.** `rental_flash_sales.module_id` still scopes a campaign to
+the rental module, but it cannot separate Car from Apartment, because both live in module
+14. A campaign could therefore mix a car and an apartment and advertise one promotion
+across two different rental products.
+
+**Rule now enforced (no schema change).** A campaign's rental type is *derived* from the
+category of the vehicles already attached to it. `storeVehicle()` reads that category and
+refuses any vehicle from a different one, so the type is fixed by the first attachment and
+consistent thereafter. Existing campaigns keep working: with nothing attached, or with a
+single category already, the rule is satisfied by construction. The admin picker groups
+vehicles by category so the intended type is visible before selecting.
+
+No `rental_flash_sales` column was added for this. The category relationship already
+carries the information, and persisting it would duplicate state that can drift from the
+attached vehicles.
 
 ## 6. Validation performed
 
