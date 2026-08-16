@@ -50,7 +50,7 @@ class VehicleController extends Controller
                 });
             });
         })
-            ->with(['provider:id,name,address,tax', 'provider.discount' => function($query){
+            ->with(['provider:id,name,address,tax,module_id', 'provider.discount' => function($query){
             return $query->validate();
         }])->withcount('vehicleIdentities as total_vehicle_count')
             ->orderBy('avg_rating', 'desc')
@@ -199,7 +199,7 @@ class VehicleController extends Controller
         })->withCount('vehicleIdentities as total_vehicles')
 
         ->with(['provider' => function($query) {
-            $query->select('id','name','logo','cover_photo','rating','address','delivery_time')
+            $query->select('id','name','logo','cover_photo','rating','address','delivery_time','module_id')
             ->withCount([
                 'vehicle_identity as provider_total_vehicle_count',
             ]);
@@ -308,7 +308,7 @@ class VehicleController extends Controller
                     });
                 });
             })
-            ->with(['provider:id,name,address,tax',  'vehicleIdentities.vehicle_trip_details','provider.discount' => function($query){
+            ->with(['provider:id,name,address,tax,module_id',  'vehicleIdentities.vehicle_trip_details','provider.discount' => function($query){
             return $query->validate();
         }]);
         if ($request?->date) {
