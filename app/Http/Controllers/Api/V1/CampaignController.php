@@ -95,7 +95,16 @@ class CampaignController extends Controller
         $item_campaign_default_status = \App\Models\BusinessSetting::where('key', 'item_campaign_default_status')->first()?->value ??  1;
         $item_campaign_sort_by_general = \App\Models\PriorityList::where('name', 'item_campaign_sort_by_general')->where('type','general')->first()?->value ?? '';
         try {
+            // The campaign already filters on its store below, but never loaded it, so
+            // the response carried no store identity and a client had to guess the
+            // logo from whatever store list happened to be in memory. Eager-loading it
+            // is additive: a nested `store` object appears, no existing field changes.
+            //
+            // Loaded whole rather than with a column list on purpose. Store has no
+            // $appends, and getLogoFullUrlAttribute() reads the `storage` relation, so
+            // a narrowed select would silently drop what the logo resolution needs.
             $query = ItemCampaign::active()
+            ->with('store')
             ->whereHas('module.zones', function($query)use($zone_id){
                 $query->whereIn('zones.id', json_decode($zone_id, true));
             })
